@@ -1,91 +1,100 @@
-# Halo frontend mockup
+# Halo realtime messaging
 
-Halo is a responsive Phase 1 prototype for direct messaging, voice/video calling, contacts, presence, notifications, settings, and administration. It is intentionally powered by realistic local mock data so product design can be reviewed before the production backend is implemented.
+Halo now includes a functional Phase 4 communication foundation: phone/OTP accounts, HTTP-only database-backed sessions, persistent PostgreSQL messages, Socket.IO delivery, presence, authenticated one-to-one LiveKit voice/video calls, automatic server-side video recording, and an admin-only recording vault. The original product mockup remains available at `/design-preview`.
 
-## Run locally
+## Run with Docker Compose
 
-Requirements: Node.js 20+ and npm 10+.
-
-```bash
-npm install
-npm run dev
-```
-
-Open `http://127.0.0.1:58321/design-preview`. Use the state selector to inspect every required screen. The normal entry at `/` begins with login; `/admin` opens the protected-admin mockup.
-
-Production build:
+Requirements: Docker Desktop or Docker Engine with Compose v2.
 
 ```bash
-npm run build
-npm run preview
-```
-
-## Prototype interactions
-
-- Login → OTP → profile setup → chat
-- Select/search conversations and send a message
-- Open notifications and start/end simulated calls
-- Browse contacts, search by phone/name, add a contact
-- Toggle presence/privacy choices and light/dark mode
-- Browse call history
-- Open admin, filter users, inspect a user drawer, view message history, and review/play automatic video recordings
-- At widths under 760px the app becomes single-pane with native-feeling back navigation
-
-The mockup does not claim end-to-end encryption. The proposed server-readable message model supports admin history access where policy permits. Video sessions are automatically recorded in the proposed architecture, visibly disclosed to participants, encrypted in object storage, and accessible only to authorized administrators through audited, short-lived playback links. Voice-only calls are not recorded. Recording laws vary by jurisdiction; production deployment must implement the required notice or consent policy.
-
-## Install with Docker Compose
-
-The repository root contains the canonical [`compose.yaml`](compose.yaml). Docker Compose discovers it automatically.
-
-### Build from a GitHub checkout
-
-```bash
-git clone https://github.com/YOUR-ACCOUNT/halo.git
-cd halo
+git clone https://github.com/kawika4783/chat.git
+cd chat
 cp .env.example .env
-# Edit .env and replace every change-this/replace-me value.
-docker compose up --build
+# Replace every change-this/replace-me value in .env.
+docker compose up -d --build
 ```
 
-Open `http://localhost:8080`. Run detached with `docker compose up -d --build`.
+Open `http://localhost:8080`. The API applies committed Prisma migrations automatically before it starts.
 
-### Pull prebuilt images from GitHub Container Registry
+The default development authentication mode displays OTP code `147296` on the sign-in screen. Set `OTP_MODE` to a real provider integration before public deployment; Halo does not yet include an SMS provider adapter.
 
-The included GitHub Actions workflow publishes three images to GHCR on pushes to `main` and version tags. In `.env`, set:
+## Verify the realtime milestone
+
+Create two accounts with different international phone numbers, using two browser profiles or devices. Search for the other account by display name, start a conversation, and send a message. Messages persist through refreshes and Compose restarts.
+
+Automated end-to-end test against a running stack:
+
+```bash
+# PowerShell
+$env:HALO_TEST_BASE_URL='http://127.0.0.1:8080'
+npm test
+```
+
+The test verifies authentication enforcement, two independent sessions, an authorized direct conversation, a realtime typing event, Socket.IO message delivery, and PostgreSQL persistence.
+
+It also verifies call initiation, incoming/accepted states, authorized room-token issuance, connected/end transitions, persisted call history, and denial of recording metadata to ordinary users.
+
+## Pull published GHCR images
+
+The GitHub workflow publishes images on pushes to `main` and version tags. Set these values in `.env`:
 
 ```dotenv
-HALO_WEB_IMAGE=ghcr.io/YOUR-ACCOUNT/halo-web:latest
-HALO_API_IMAGE=ghcr.io/YOUR-ACCOUNT/halo-api:latest
-HALO_RECORDER_IMAGE=ghcr.io/YOUR-ACCOUNT/halo-recording-worker:latest
+HALO_WEB_IMAGE=ghcr.io/kawika4783/halo-web:latest
+HALO_API_IMAGE=ghcr.io/kawika4783/halo-api:latest
 ```
 
-Then install or update without building locally:
+Then:
 
 ```bash
 docker compose pull
 docker compose up -d --no-build
 ```
 
-Services: production Nginx web image, Phase 1 mock API, PostgreSQL, Redis, recording worker, private MinIO-compatible recording storage, and a one-shot bucket initializer. Data persists in named Docker volumes.
+See [Docker deployment](docs/docker.md) for updates, backups, and production exposure guidance.
 
-See [Docker deployment](docs/docker.md) for health checks, updates, backups, GHCR publishing, and removal.
+## Development
+
+Requirements: Node.js 22+, npm 10+, and a PostgreSQL database.
+
+```bash
+npm install
+npm run db:generate
+npm run dev
+```
+
+Run the API separately with `DATABASE_URL`, `SESSION_SECRET`, and the OTP variables from `.env.example`:
+
+```bash
+npm run db:migrate
+npm run dev:api
+```
+
+The Vite-only development server does not proxy `/api`; Docker Compose is the supported full-stack development path. `npm run build` validates the production frontend bundle.
+
+## Implemented security boundaries
+
+- Session tokens are random, stored only as SHA-256 hashes, and delivered in HTTP-only `SameSite=Lax` cookies.
+- OTP values are HMAC-hashed, expire after five minutes, have attempt limits, and are request-rate-limited per IP/phone in this single-node milestone.
+- Every conversation and message query checks membership server-side.
+- Message `clientId` values provide per-sender idempotency.
+- Other users' phone numbers are not returned by public user or conversation payloads.
+- PostgreSQL foreign keys and conversation/message access indexes are committed in the initial migration.
+
+Before internet exposure, add TLS, a real SMS provider, distributed Redis rate limiting, CSRF origin validation, observability, account recovery, abuse controls, and a formal security review.
 
 ## Project map
 
 ```text
-src/
-  App.jsx             screen and reusable UI components
-  data.js             realistic mock users, messages, and calls
-  styles.css          design tokens, responsive layouts, motion
-docs/
-  architecture.md     services, auth, scaling, security, operations
-  api.md              HTTP endpoint contract
-  realtime.md         WebSocket and WebRTC signaling events
-  component-structure.md
-  docker.md           Compose/GitHub/GHCR deployment operations
-prisma/schema.prisma  proposed relational schema and indexes
-infrastructure/       Docker and Coturn configuration
-.github/workflows/    GHCR image publishing
+services/api/server.mjs      real authentication, REST, and Socket.IO API
+src/LiveApp.jsx              messaging, LiveKit calls, and admin recording vault
+src/App.jsx                  original design-preview component library
+prisma/schema.prisma         relational model
+prisma/migrations/           committed PostgreSQL migration history
+tests/realtime.test.mjs      two-user full-stack integration test
+compose.yaml                 canonical installation
+infrastructure/              Docker, Nginx, and Coturn configuration
 ```
 
-This deliverable completes Phase 1 only. The docs describe the planned architecture for Phases 2–10 without pretending the mock API is production-ready.
+## Current boundary
+
+Messaging and authenticated one-to-one voice/video calling are functional. Media is routed by LiveKit; a video call automatically starts LiveKit Egress and writes an MP4 to the private MinIO bucket. Only `ADMIN` and `SUPER_ADMIN` sessions can list recordings or request a short-lived playback URL, and each playback request is audit logged. Configure TLS, public LiveKit networking, strong secrets, and jurisdiction-appropriate recording consent before an Internet deployment.

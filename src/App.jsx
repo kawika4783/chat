@@ -8,6 +8,7 @@ import {
   Film, Play, HardDrive, Eye, Circle
 } from 'lucide-react';
 import { calls, people, previewStates, recordings, seedMessages } from './data';
+import LiveApp from './LiveApp';
 
 const cx = (...v) => v.filter(Boolean).join(' ');
 
@@ -232,7 +233,5 @@ export default function App(){
   useEffect(()=>{document.documentElement.dataset.theme=dark?'dark':'light'},[dark]);
   useEffect(()=>{if(previewPath){const url=new URL(location.href);url.searchParams.set('state',state);history.replaceState({},'',url)}},[state]);
   if(previewPath) return <DesignPreview state={state} setState={setState} dark={dark} setDark={setDark}/>;
-  if(['login','register','otp','profile-setup'].includes(state)) return <AuthScreen kind={state} onContinue={()=>setState(state==='login'?'otp':state==='otp'?'profile-setup':'chat')}/>;
-  if(state.startsWith('admin')) return <AdminShell initial={state} onExit={()=>setState('chat')}/>;
-  return <MessagingApp initial={state} dark={dark} setDark={setDark} onAdmin={()=>setState('admin')}/>;
+  return <LiveApp/>;
 }

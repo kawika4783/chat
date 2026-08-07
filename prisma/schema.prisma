@@ -1,86 +1,162 @@
-generator client { provider = "prisma-client-js" }
-datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
+generator client {
+  provider = "prisma-client-js"
+}
 
-enum Role { USER MODERATOR ADMIN SUPER_ADMIN }
-enum PresenceStatus { ONLINE OFFLINE AWAY BUSY IN_CALL }
-enum MessageType { TEXT IMAGE VIDEO AUDIO DOCUMENT LOCATION VOICE_MESSAGE }
-enum CallType { VOICE VIDEO }
-enum CallStatus { CALLING RINGING ACCEPTED CONNECTED COMPLETED MISSED REJECTED BUSY NO_ANSWER FAILED ENDED }
-enum RecordingStatus { STARTING RECORDING PROCESSING READY FAILED DELETED }
-enum NotificationType { MESSAGE INCOMING_CALL MISSED_CALL CONTACT_REQUEST }
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  MODERATOR
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum PresenceStatus {
+  ONLINE
+  OFFLINE
+  AWAY
+  BUSY
+  IN_CALL
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  LOCATION
+  VOICE_MESSAGE
+}
+
+enum CallType {
+  VOICE
+  VIDEO
+}
+
+enum CallStatus {
+  CALLING
+  RINGING
+  ACCEPTED
+  CONNECTED
+  COMPLETED
+  MISSED
+  REJECTED
+  BUSY
+  NO_ANSWER
+  FAILED
+  ENDED
+}
+
+enum RecordingStatus {
+  STARTING
+  RECORDING
+  PROCESSING
+  READY
+  FAILED
+  DELETED
+}
+
+enum NotificationType {
+  MESSAGE
+  INCOMING_CALL
+  MISSED_CALL
+  CONTACT_REQUEST
+}
 
 model User {
-  id String @id @default(cuid())
-  phoneE164 String @unique
-  email String? @unique
-  role Role @default(USER)
-  disabledAt DateTime?
-  suspendedUntil DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  profile Profile?
-  sessions Session[]
-  contacts Contact[] @relation("ContactOwner")
-  contactOf Contact[] @relation("ContactTarget")
-  blocks BlockedUser[] @relation("Blocker")
-  blockedBy BlockedUser[] @relation("Blocked")
-  memberships ConversationMember[]
-  messages Message[]
-  receipts MessageReceipt[]
-  reactions MessageReaction[]
-  devices Device[]
-  notifications Notification[]
-  otpRequests OtpRequest[]
+  id              String               @id @default(cuid())
+  phoneE164       String?              @unique
+  email           String?              @unique
+  role            Role                 @default(USER)
+  disabledAt      DateTime?
+  suspendedUntil  DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  profile         Profile?
+  sessions        Session[]
+  contacts        Contact[]            @relation("ContactOwner")
+  contactOf       Contact[]            @relation("ContactTarget")
+  blocks          BlockedUser[]        @relation("Blocker")
+  blockedBy       BlockedUser[]        @relation("Blocked")
+  memberships     ConversationMember[]
+  messages        Message[]
+  receipts        MessageReceipt[]
+  reactions       MessageReaction[]
+  devices         Device[]
+  notifications   Notification[]
+  otpRequests     OtpRequest[]
+  adminCredential AdminCredential?
+
   @@index([createdAt])
 }
 
+model AdminCredential {
+  userId             String   @id
+  username           String   @unique
+  passwordHash       String
+  mustRotatePassword Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([username])
+}
+
 model Profile {
-  userId String @id
-  displayName String
-  avatarUrl String?
-  statusMessage String?
-  presence PresenceStatus @default(OFFLINE)
-  lastSeenAt DateTime?
-  onlineVisibility String @default("CONTACTS")
-  lastSeenVisibility String @default("CONTACTS")
-  callVisibility String @default("CONTACTS")
-  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+  userId             String         @id
+  displayName        String
+  avatarUrl          String?
+  statusMessage      String?
+  presence           PresenceStatus @default(OFFLINE)
+  lastSeenAt         DateTime?
+  onlineVisibility   String         @default("CONTACTS")
+  lastSeenVisibility String         @default("CONTACTS")
+  callVisibility     String         @default("CONTACTS")
+  user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([displayName])
   @@index([presence, lastSeenAt])
 }
 
 model Session {
-  id String @id @default(cuid())
-  userId String
-  deviceId String
-  refreshTokenHash String @unique
-  tokenFamily String
-  ipHash String?
-  expiresAt DateTime
-  revokedAt DateTime?
-  createdAt DateTime @default(now())
-  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+  id               String    @id @default(cuid())
+  userId           String
+  deviceId         String
+  refreshTokenHash String    @unique
+  tokenFamily      String
+  ipHash           String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId, revokedAt])
 }
 
 model Device {
-  id String @id @default(cuid())
-  userId String
-  name String
-  platform String
-  pushToken String?
+  id             String   @id @default(cuid())
+  userId         String
+  name           String
+  platform       String
+  pushToken      String?
   lastActivityAt DateTime @default(now())
-  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@unique([userId, id])
   @@index([userId, lastActivityAt])
 }
 
 model Contact {
-  ownerId String
+  ownerId   String
   contactId String
   createdAt DateTime @default(now())
-  owner User @relation("ContactOwner", fields:[ownerId], references:[id], onDelete:Cascade)
-  contact User @relation("ContactTarget", fields:[contactId], references:[id], onDelete:Cascade)
+  owner     User     @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  contact   User     @relation("ContactTarget", fields: [contactId], references: [id], onDelete: Cascade)
+
   @@id([ownerId, contactId])
   @@index([contactId])
 }
@@ -89,168 +165,186 @@ model BlockedUser {
   blockerId String
   blockedId String
   createdAt DateTime @default(now())
-  blocker User @relation("Blocker", fields:[blockerId], references:[id], onDelete:Cascade)
-  blocked User @relation("Blocked", fields:[blockedId], references:[id], onDelete:Cascade)
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
   @@id([blockerId, blockedId])
   @@index([blockedId])
 }
 
 model Conversation {
-  id String @id @default(cuid())
-  directKey String? @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  members ConversationMember[]
-  messages Message[]
+  id        String               @id @default(cuid())
+  directKey String?              @unique
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  members   ConversationMember[]
+  messages  Message[]
+
   @@index([updatedAt])
 }
 
 model ConversationMember {
-  conversationId String
-  userId String
-  joinedAt DateTime @default(now())
+  conversationId    String
+  userId            String
+  joinedAt          DateTime     @default(now())
   lastReadMessageId String?
-  conversation Conversation @relation(fields:[conversationId], references:[id], onDelete:Cascade)
-  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@id([conversationId, userId])
   @@index([userId, conversationId])
 }
 
 model Message {
-  id String @id @default(cuid())
+  id             String            @id @default(cuid())
   conversationId String
-  senderId String
-  clientId String
-  type MessageType @default(TEXT)
-  content Json
-  replyToId String?
-  createdAt DateTime @default(now())
-  editedAt DateTime?
-  deletedAt DateTime?
-  conversation Conversation @relation(fields:[conversationId], references:[id], onDelete:Cascade)
-  sender User @relation(fields:[senderId], references:[id])
-  receipts MessageReceipt[]
-  reactions MessageReaction[]
+  senderId       String
+  clientId       String
+  type           MessageType       @default(TEXT)
+  content        Json
+  replyToId      String?
+  createdAt      DateTime          @default(now())
+  editedAt       DateTime?
+  deletedAt      DateTime?
+  conversation   Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User              @relation(fields: [senderId], references: [id])
+  receipts       MessageReceipt[]
+  reactions      MessageReaction[]
+
   @@unique([senderId, clientId])
   @@index([conversationId, createdAt(sort: Desc)])
   @@index([senderId, createdAt])
 }
 
 model MessageReceipt {
-  messageId String
-  userId String
+  messageId   String
+  userId      String
   deliveredAt DateTime?
-  readAt DateTime?
-  message Message @relation(fields:[messageId], references:[id], onDelete:Cascade)
-  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+  readAt      DateTime?
+  message     Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@id([messageId, userId])
   @@index([userId, readAt])
 }
 
 model MessageReaction {
   messageId String
-  userId String
-  emoji String
+  userId    String
+  emoji     String
   createdAt DateTime @default(now())
-  message Message @relation(fields:[messageId], references:[id], onDelete:Cascade)
-  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@id([messageId, userId, emoji])
 }
 
 model Call {
-  id String @id @default(cuid())
-  callerId String
-  recipientId String
-  type CallType
-  status CallStatus
-  startedAt DateTime @default(now())
-  connectedAt DateTime?
-  endedAt DateTime?
+  id              String            @id @default(cuid())
+  callerId        String
+  recipientId     String
+  type            CallType
+  roomName        String?           @unique
+  status          CallStatus
+  startedAt       DateTime          @default(now())
+  connectedAt     DateTime?
+  endedAt         DateTime?
   durationSeconds Int?
-  participants CallParticipant[]
-  recordings VideoRecording[]
+  participants    CallParticipant[]
+  recordings      VideoRecording[]
+
   @@index([callerId, startedAt(sort: Desc)])
   @@index([recipientId, startedAt(sort: Desc)])
   @@index([status, startedAt])
 }
 
 model VideoRecording {
-  id String @id @default(cuid())
-  callId String
-  status RecordingStatus @default(STARTING)
-  objectKey String @unique
+  id               String               @id @default(cuid())
+  callId           String
+  status           RecordingStatus      @default(STARTING)
+  objectKey        String               @unique
+  egressId         String?              @unique
+  roomName         String
+  errorMessage     String?
   encryptionKeyRef String
-  mimeType String @default("video/mp4")
-  sizeBytes BigInt?
-  durationSeconds Int?
-  checksumSha256 String?
-  startedAt DateTime @default(now())
-  completedAt DateTime?
-  expiresAt DateTime
-  deletedAt DateTime?
-  call Call @relation(fields:[callId], references:[id], onDelete:Restrict)
-  accessLogs RecordingAccessLog[]
+  mimeType         String               @default("video/mp4")
+  sizeBytes        BigInt?
+  durationSeconds  Int?
+  checksumSha256   String?
+  startedAt        DateTime             @default(now())
+  completedAt      DateTime?
+  expiresAt        DateTime
+  deletedAt        DateTime?
+  call             Call                 @relation(fields: [callId], references: [id], onDelete: Restrict)
+  accessLogs       RecordingAccessLog[]
+
   @@index([callId, startedAt(sort: Desc)])
+  @@index([egressId])
   @@index([status, expiresAt])
 }
 
 model RecordingAccessLog {
-  id String @id @default(cuid())
+  id          String         @id @default(cuid())
   recordingId String
-  adminId String
-  action String
-  reason String?
-  ipHash String?
-  createdAt DateTime @default(now())
-  recording VideoRecording @relation(fields:[recordingId], references:[id], onDelete:Restrict)
+  adminId     String
+  action      String
+  reason      String?
+  ipHash      String?
+  createdAt   DateTime       @default(now())
+  recording   VideoRecording @relation(fields: [recordingId], references: [id], onDelete: Restrict)
+
   @@index([recordingId, createdAt(sort: Desc)])
   @@index([adminId, createdAt(sort: Desc)])
 }
 
 model CallParticipant {
-  callId String
-  userId String
+  callId   String
+  userId   String
   joinedAt DateTime?
-  leftAt DateTime?
-  call Call @relation(fields:[callId], references:[id], onDelete:Cascade)
+  leftAt   DateTime?
+  call     Call      @relation(fields: [callId], references: [id], onDelete: Cascade)
+
   @@id([callId, userId])
 }
 
 model Notification {
-  id String @id @default(cuid())
-  userId String
-  type NotificationType
-  payload Json
-  readAt DateTime?
-  createdAt DateTime @default(now())
-  user User @relation(fields:[userId], references:[id], onDelete:Cascade)
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  payload   Json
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId, readAt, createdAt(sort: Desc)])
 }
 
 model AdminAuditLog {
-  id String @id @default(cuid())
-  adminId String
-  action String
+  id         String   @id @default(cuid())
+  adminId    String
+  action     String
   targetType String
-  targetId String
-  metadata Json?
-  ipHash String?
-  createdAt DateTime @default(now())
+  targetId   String
+  metadata   Json?
+  ipHash     String?
+  createdAt  DateTime @default(now())
+
   @@index([adminId, createdAt(sort: Desc)])
   @@index([targetType, targetId])
 }
 
 model OtpRequest {
-  id String @id @default(cuid())
-  userId String?
-  phoneE164 String
-  codeHash String
-  provider String
-  attempts Int @default(0)
-  expiresAt DateTime
+  id         String    @id @default(cuid())
+  userId     String?
+  phoneE164  String
+  codeHash   String
+  provider   String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
   consumedAt DateTime?
-  createdAt DateTime @default(now())
-  user User? @relation(fields:[userId], references:[id], onDelete:SetNull)
+  createdAt  DateTime  @default(now())
+  user       User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
   @@index([phoneE164, createdAt(sort: Desc)])
   @@index([expiresAt])
 }

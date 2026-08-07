@@ -44,7 +44,7 @@ This design is explicitly server-readable. It is not end-to-end encrypted. Intro
 
 ## Calls
 
-The API stores signaling authorization and call metadata. SDP and ICE are exchanged over the authenticated signaling socket. Voice-only media remains peer-to-peer where possible. Because video sessions must be recorded automatically, video calls additionally publish an authorized media fork through an SFU/recording participant. A pure peer-to-peer server cannot reliably create a central recording.
+The API stores call authorization and metadata and issues short-lived, participant-scoped LiveKit room tokens. Socket.IO handles invite, ringing, accept, and end events; LiveKit handles WebRTC media. Because video sessions must be recorded automatically, every accepted video call uses the SFU and LiveKit Egress. A pure peer-to-peer server cannot reliably create a central recording.
 
 When a video call connects, the server creates a `VideoRecording` row and starts the recorder. The UI shows a persistent recording indicator and disclosure. The worker packages the composite or participant tracks, encrypts the object with a managed KMS key, writes it to a private bucket, records a checksum, and transitions `STARTING → RECORDING → PROCESSING → READY`. Failures are visible to administrators and audited.
 
@@ -70,7 +70,7 @@ Default retention is 30 days, followed by cryptographic deletion and a tombstone
 
 ## Scaling
 
-Keep API replicas stateless. The load balancer terminates TLS and supports WebSocket upgrades; sticky sessions are optional because socket identity/routing and pub/sub live in Redis. PostgreSQL uses read replicas for admin/reporting queries, partitioned message/audit tables at scale, and connection pooling. WebRTC remains P2P; autoscaled Coturn handles relay traffic separately.
+Keep API replicas stateless. The load balancer terminates TLS and supports WebSocket upgrades. PostgreSQL uses read replicas for admin/reporting queries, partitioned message/audit tables at scale, and connection pooling. Scale LiveKit nodes and Egress workers independently; expose the documented RTC TCP/UDP ports and provide TURN/TLS for restrictive networks.
 
 ## Backup and recovery
 

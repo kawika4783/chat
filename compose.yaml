@@ -33,15 +33,27 @@ services:
       REDIS_URL: redis://redis:6379
       OTP_MODE: ${OTP_MODE:-mock}
       MOCK_OTP_CODE: ${MOCK_OTP_CODE:-147296}
-      SESSION_SECRET: ${SESSION_SECRET:-change-me-before-production}
+      SESSION_SECRET: ${SESSION_SECRET:-change-me-before-production-with-32-bytes}
       STUN_SERVER: ${STUN_SERVER:-stun:stun.l.google.com:19302}
       TURN_SERVER: ${TURN_SERVER:-turn:turn.example.com:3478}
       TURN_USERNAME: ${TURN_USERNAME:-replace-me}
       TURN_PASSWORD: ${TURN_PASSWORD:-replace-me}
       VIDEO_RECORDING_ENABLED: ${VIDEO_RECORDING_ENABLED:-true}
+      VIDEO_RECORDING_RETENTION_DAYS: ${VIDEO_RECORDING_RETENTION_DAYS:-30}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-development-livekit-secret-change-me}
+      LIVEKIT_INTERNAL_URL: http://livekit:7880
+      LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-ws://localhost:7880}
       RECORDING_STORAGE_ENDPOINT: http://object-storage:9000
+      RECORDING_PUBLIC_ENDPOINT: ${RECORDING_PUBLIC_ENDPOINT:-http://localhost:9000}
       RECORDING_BUCKET: ${RECORDING_BUCKET:-halo-video-recordings}
+      RECORDING_STORAGE_ACCESS_KEY: ${RECORDING_STORAGE_ACCESS_KEY:-halo_recordings}
+      RECORDING_STORAGE_SECRET_KEY: ${RECORDING_STORAGE_SECRET_KEY:-halo_recordings_change_me}
+      RECORDING_KMS_KEY_ID: ${RECORDING_KMS_KEY_ID:-private-object-storage}
       RECORDING_SIGNED_URL_TTL_SECONDS: ${RECORDING_SIGNED_URL_TTL_SECONDS:-120}
+      ADMIN_BOOTSTRAP_ENABLED: ${ADMIN_BOOTSTRAP_ENABLED:-false}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,6 +61,8 @@ services:
         condition: service_healthy
       recording-bucket-init:
         condition: service_completed_successfully
+      livekit:
+        condition: service_started
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
@@ -57,33 +71,52 @@ services:
       start_period: 10s
     networks: [halo]
 
-  recording-worker:
-    image: ${HALO_RECORDER_IMAGE:-halo-recording-worker:local}
-    build:
-      context: .
-      dockerfile: infrastructure/docker/recording-worker.Dockerfile
+  livekit:
+    image: livekit/livekit-server:v1.13.1
     restart: unless-stopped
-    expose: ["3002"]
     environment:
-      NODE_ENV: production
-      REDIS_URL: redis://redis:6379
-      RECORDING_STORAGE_ENDPOINT: http://object-storage:9000
-      RECORDING_BUCKET: ${RECORDING_BUCKET:-halo-video-recordings}
-      RECORDING_STORAGE_ACCESS_KEY: ${RECORDING_STORAGE_ACCESS_KEY:-halo_recordings}
-      RECORDING_STORAGE_SECRET_KEY: ${RECORDING_STORAGE_SECRET_KEY:-halo_recordings_change_me}
-      RECORDING_RETENTION_DAYS: ${VIDEO_RECORDING_RETENTION_DAYS:-30}
-      RECORDING_KMS_KEY_ID: ${RECORDING_KMS_KEY_ID:-development-key-placeholder}
+      LIVEKIT_CONFIG: |
+        port: 7880
+        log_level: info
+        rtc:
+          tcp_port: 7881
+          port_range_start: 50000
+          port_range_end: 50100
+          use_external_ip: false
+        redis:
+          address: redis:6379
+        keys:
+          ${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-development-livekit-secret-change-me}
+    ports:
+      - "${LIVEKIT_BIND_ADDRESS:-0.0.0.0}:${LIVEKIT_HTTP_PORT:-7880}:7880"
+      - "${LIVEKIT_BIND_ADDRESS:-0.0.0.0}:${LIVEKIT_TCP_PORT:-7881}:7881/tcp"
+      - "${LIVEKIT_BIND_ADDRESS:-0.0.0.0}:50000-50100:50000-50100/udp"
     depends_on:
       redis:
         condition: service_healthy
-      recording-bucket-init:
-        condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
+    networks: [halo]
+
+  livekit-egress:
+    image: livekit/egress:v1.12.0
+    restart: unless-stopped
+    cap_add: [SYS_ADMIN]
+    shm_size: "1gb"
+    environment:
+      EGRESS_CONFIG_BODY: |
+        api_key: ${LIVEKIT_API_KEY:-devkey}
+        api_secret: ${LIVEKIT_API_SECRET:-development-livekit-secret-change-me}
+        ws_url: ws://livekit:7880
+        health_port: 8080
+        redis:
+          address: redis:6379
+        logging:
+          level: info
+          json: true
+    depends_on:
+      livekit:
+        condition: service_started
+      redis:
+        condition: service_healthy
     networks: [halo]
 
   object-storage:
@@ -96,6 +129,7 @@ services:
     volumes:
       - halo_recordings:/data
     ports:
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     networks: [halo]
 

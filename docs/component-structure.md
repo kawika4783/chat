@@ -20,7 +20,7 @@ App
    └─ AdminRecordings → Recording player modal
 ```
 
-`App` owns only top-level routing/theme state. Feature components own local prototype state. Repeated primitives (`Avatar`, `IconButton`, `StatusText`, `Page`) keep status, icon, spacing, and control behavior consistent. A production split would move these into `packages/ui`, feature components into `apps/web/features`, and contracts/data access into shared packages.
+`LiveApp` owns authentication, messaging, LiveKit call media, and the `/admin` recording vault. It restores the HTTP-only session, loads authorized server data, maintains one Socket.IO connection, and lazy-loads the LiveKit browser SDK only when a call connects. `App` retains the original component library behind `/design-preview`. A later package split can move shared primitives into `packages/ui` and API contracts into a shared package.
 
 ## Design tokens
 

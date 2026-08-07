@@ -20,8 +20,6 @@ jobs:
             dockerfile: infrastructure/docker/web.Dockerfile
           - image: halo-api
             dockerfile: infrastructure/docker/api.Dockerfile
-          - image: halo-recording-worker
-            dockerfile: infrastructure/docker/recording-worker.Dockerfile
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3

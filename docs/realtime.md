@@ -1,42 +1,29 @@
-# WebSocket and WebRTC specification
+# Implemented realtime protocol
 
-Socket handshake carries a short-lived access credential/cookie, CSRF-safe origin, device ID, and protocol version. Every client event includes an idempotency/correlation ID.
+Socket.IO is served at `/socket.io`. The handshake authenticates the same HTTP-only session cookie used by the REST API. A connected socket joins its private user room and every authorized conversation room.
 
-## Messaging and presence events
-
-| Direction | Event | Essential payload |
+| Direction | Event | Payload |
 |---|---|---|
-| C→S | `presence.heartbeat` | `deviceId`, `lastActivityAt` |
-| S→C | `presence.changed` | authorized `userId`, status, optional lastSeen |
-| C→S | `message.send` | `conversationId`, clientId, type, content, replyToId? |
-| S→C | `message.ack` | clientId, messageId, state, persistedAt |
-| S→C | `message.created` | authorized message envelope |
-| C→S | `message.read` | conversationId, throughMessageId |
-| S→C | `message.receipt` | messageId, userId, deliveredAt/readAt |
-| C↔S | `typing.start/stop` | conversationId; ephemeral and rate-limited |
-| S→C | `notification.created` | type, actor, target, createdAt |
+| Server → client | `message:new` | Persisted message envelope |
+| Client → server | `typing:start` | `{ conversationId }` |
+| Client → server | `typing:stop` | `{ conversationId }` |
+| Server → client | `typing:start` / `typing:stop` | `{ conversationId, userId }` after membership validation |
+| Server → client | `presence:update` | `{ userId, status }` |
 
-## Signaling events
+## Call signaling
 
-`call.initiate` → `call.incoming` → `call.accept`/`call.reject` → SDP/ICE → `call.connected` → `call.end`.
+Every call event derives the sender from the authenticated socket. The server verifies that the actor is the caller or recipient before relaying session descriptions or ICE candidates.
 
-| Event | Payload / rule |
-|---|---|
-| `call.initiate` | recipientId, type; server checks blocks/privacy/busy state |
-| `call.incoming` | callId, sanitized caller, type, expiresAt |
-| `call.accept/reject/busy` | callId; recipient only |
-| `rtc.offer/answer` | callId, SDP; participants only, size limited |
-| `rtc.ice` | callId, candidate; participants only, rate limited |
-| `call.connected` | callId, connectedAt |
-| `recording.started` | callId, recordingId, noticeVersion; emitted to every video participant |
-| `recording.status` | callId, status; participants receive start/failure notice, admins receive processing state |
-| `call.end` | callId, reason; idempotent from either participant |
-| `call.reconnect` | callId, lastSequence; restores signaling state only |
+| Direction | Event | Purpose |
+|---|---|---|
+| Client → server | `call:initiate` | Start an online voice/video call with `{ recipientId, type }` |
+| Server → client | `call:incoming` | Notify the recipient with sanitized caller metadata |
+| Client → server | `call:accept` / `call:reject` | Recipient-only ringing decision |
+| Server → client | `call:accepted` / `call:ended` | Notify the other participant |
+| Both directions | `rtc:offer` / `rtc:answer` | Authorized SDP relay |
+| Both directions | `rtc:ice` | Authorized, size-limited ICE candidate relay |
+| Both directions | `call:connected` / `call:end` | Persist connected time, end state, and duration |
 
-Actual audio/video never traverses the application WebSocket server. ICE attempts host/server-reflexive candidates and automatically uses TURN relay candidates when direct connectivity fails. For recorded video sessions, an SFU media path sends an authorized copy to the isolated recording worker; this is distinct from the signaling server. Server call states: calling, ringing, accepted, connected, rejected, busy, no_answer, ended, failed.
+Typing is ephemeral and is rendered only after a real event; the client automatically sends `typing:stop` after 900 ms of inactivity. Durable messages are reloaded through HTTP after reconnecting or refreshing.
 
-The server emits `recording.started` only after policy/consent checks and recorder readiness. The client must keep a persistent visible indicator for the entire recorded interval; hiding it is not a supported client state.
-
-## Reconnection
-
-Clients use exponential backoff with jitter and resume from the last event cursor. The server replays durable messages/receipts/notifications, not typing events. Call reconnection has a short deadline and rejects stale offers. Redis pub/sub distributes events across gateway replicas.
+Redis-backed multi-replica Socket.IO fan-out, replay cursors, delivery/read receipts, group calls, and call reconnection are not implemented yet. Call media uses the LiveKit SFU and does not traverse the application Socket.IO server.

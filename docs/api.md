@@ -1,39 +1,23 @@
-# HTTP API design
+# Implemented HTTP API
 
-All payloads are versioned under `/v1`, validated, and return `{ data, error, requestId }`. Cursor pagination is used for histories.
+Nginx exposes these endpoints below `/api`; the API service receives the paths without that prefix. JSON errors use `{ "error": "message" }`. Authenticated routes require the `halo_session` HTTP-only cookie.
 
-| Method | Route | Purpose |
+| Method | Public route | Purpose |
 |---|---|---|
-| POST | `/auth/otp/request` | Request throttled OTP through `SMSProvider` |
-| POST | `/auth/otp/verify` | Verify code, create session/profile requirement |
-| POST | `/auth/refresh` | Rotate refresh token |
-| POST | `/auth/logout` | Revoke current session |
-| GET/PATCH | `/me` | Read/update profile and privacy settings |
-| GET/DELETE | `/me/sessions/:id` | List or revoke device sessions |
-| GET/POST | `/contacts` | Search/list/add contacts |
-| DELETE | `/contacts/:userId` | Remove contact |
-| POST/DELETE | `/blocks/:userId` | Block/unblock user |
-| GET | `/conversations` | Recent conversations with unread counts |
-| GET | `/conversations/:id/messages` | Authorized paged history |
-| POST | `/conversations/:id/messages` | Persist a message with idempotency key |
-| PATCH/DELETE | `/messages/:id` | Edit/delete own message under policy |
-| POST/DELETE | `/messages/:id/reactions/:emoji` | Add/remove reaction |
-| POST | `/conversations/:id/read` | Advance read cursor |
-| GET | `/calls` | User call history |
-| POST | `/calls` | Create authorized call attempt |
-| GET | `/rtc/config` | Short-lived STUN/TURN configuration |
-| GET | `/notifications` | In-app notifications |
-| POST | `/notifications/:id/read` | Mark notification read |
-| GET | `/admin/users` | Admin-filtered user list |
-| GET/PATCH | `/admin/users/:id` | Inspect/enable/suspend/role update |
-| DELETE | `/admin/users/:id` | Policy-gated deletion |
-| POST | `/admin/users/:id/revoke-sessions` | Force logout |
-| GET | `/admin/messages` | Policy-gated server-readable history search |
-| GET | `/admin/calls` | Call metadata only |
-| GET | `/admin/recordings` | Search recording metadata; `recordings:read` required |
-| GET | `/admin/recordings/:id` | Read recording status and audited metadata |
-| POST | `/admin/recordings/:id/playback-token` | Create a two-minute single-purpose signed playback URL and access log |
-| DELETE | `/admin/recordings/:id` | Privileged early deletion with immutable audit event |
-| GET | `/admin/audit` | Immutable admin audit events |
+| GET | `/api/health` | Database-backed readiness response |
+| POST | `/api/auth/request-otp` | Validate/rate-limit a phone and create a five-minute OTP |
+| POST | `/api/auth/verify-otp` | Consume OTP, upsert account/profile, create session cookie |
+| POST | `/api/auth/admin/login` | Verify an administrator credential and create a session cookie |
+| GET | `/api/auth/me` | Restore the current session |
+| POST | `/api/auth/logout` | Revoke the current session and clear its cookie |
+| GET | `/api/users?query=` | Search registered users without exposing their phone numbers |
+| GET | `/api/calls` | Return the current user's latest call metadata |
+| GET | `/api/calls/:id/join` | Issue a short-lived LiveKit room token to a call participant |
+| GET | `/api/conversations` | List the current user's direct conversations |
+| POST | `/api/conversations/direct` | Idempotently create a direct conversation with `userId` |
+| GET | `/api/conversations/:id/messages` | Read up to 100 authorized persistent messages |
+| POST | `/api/conversations/:id/messages` | Persist text using `{ text, clientId }` and publish it realtime |
+| GET | `/api/admin/recordings` | Admin-only recording metadata and status refresh |
+| POST | `/api/admin/recordings/:id/playback-token` | Audit access and issue a short-lived private-object URL |
 
-Recording endpoints additionally use `RECORDING_NOT_READY`, `RECORDING_EXPIRED`, `RECORDING_ACCESS_REQUIRED`, and `RECORDING_POLICY_BLOCKED`. The playback endpoint requires a reason and applies stricter rate limits; it never exposes the permanent object key as a usable URL.
+The current API intentionally omits contacts, attachments, read receipts, account recovery, recording export/download controls, and administrative user management.

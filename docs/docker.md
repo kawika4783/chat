@@ -17,6 +17,8 @@
 
 The web image is a multi-stage build: Node compiles the application, then only static output and Nginx remain in the runtime image. SPA routes fall back to `index.html`; `/healthz` is used by Compose.
 
+The web container starts after the API container is started rather than blocking on the API health gate. This avoids managed Compose platforms leaving Nginx in `Created` when the API is still applying first-run migrations. Nginx may briefly return `502` for `/api` during that warm-up, then recovers automatically when the API begins listening.
+
 ## Source installation
 
 ```bash

@@ -1,0 +1,84 @@
+# Proposed production architecture
+
+## Services and boundaries
+
+```text
+Browser/PWA
+  ├─ HTTPS REST → API service (Fastify/NestJS)
+  ├─ authenticated WebSocket → realtime gateway
+  ├─ WebRTC media → peer/Coturn for voice and ordinary transport
+  └─ video media fork → SFU/recording worker → encrypted object storage
+                         │
+Load balancer ───────────┤
+  ├─ API/gateway replicas│
+  ├─ PostgreSQL          │ durable users, conversations, messages, calls, audit
+  ├─ Redis               │ presence TTLs, socket routing, rate limits, pub/sub
+  ├─ SMSProvider         │ Mock/Twilio/SNS/Vonage adapter
+  ├─ object storage      │ encrypted video recordings and future attachments
+  └─ recording worker    │ authorized SFU media fork, packaging, retention
+```
+
+The web app never trusts frontend IDs. Each REST handler and socket event derives the actor from the authenticated session, validates payloads, checks conversation/contact/block/RBAC policy, and only then reads or mutates data.
+
+## Authentication
+
+1. `POST /auth/otp/request` normalizes an E.164 phone number, applies per-phone/IP/device throttles, stores a hashed short-lived code, and dispatches via `SMSProvider`.
+2. `POST /auth/otp/verify` consumes one valid code and creates/locates the unique user.
+3. Server issues a short-lived access token plus rotating refresh token in `HttpOnly`, `Secure`, `SameSite=Lax` cookies. Reuse detection revokes the token family.
+4. WebSockets authenticate during handshake and re-authorize every sensitive event.
+5. `MockSMSProvider` accepts only development/test mode and must be impossible to enable in production.
+
+Provider interface: `sendOtp({ e164Phone, code, locale, expiresAt }): Promise<ProviderReceipt>`.
+
+## Presence
+
+On connection, Redis stores `presence:{userId}:{deviceId}` with a 45-second TTL. Heartbeats renew it; disconnect schedules a short grace window. Effective presence aggregates devices and publishes changes through Redis pub/sub to authorized contacts. Last activity is persisted with write coalescing. No polling is used.
+
+Statuses: online, offline, away, busy, in_call. Block and privacy policy are applied before emitting presence detail.
+
+## Messaging
+
+Messages are stored before acknowledgement. A client-generated idempotency key prevents duplicates after reconnect. Delivery and read receipts are separate rows. Edits keep `editedAt`; deletion uses `deletedAt` plus an optional admin audit event. Message type is modeled now for text, image, video, audio, document, location, and voice message.
+
+This design is explicitly server-readable. It is not end-to-end encrypted. Introducing E2EE later changes search, moderation, backups, multi-device key management, and administrator content access.
+
+## Calls
+
+The API stores signaling authorization and call metadata. SDP and ICE are exchanged over the authenticated signaling socket. Voice-only media remains peer-to-peer where possible. Because video sessions must be recorded automatically, video calls additionally publish an authorized media fork through an SFU/recording participant. A pure peer-to-peer server cannot reliably create a central recording.
+
+When a video call connects, the server creates a `VideoRecording` row and starts the recorder. The UI shows a persistent recording indicator and disclosure. The worker packages the composite or participant tracks, encrypts the object with a managed KMS key, writes it to a private bucket, records a checksum, and transitions `STARTING → RECORDING → PROCESSING → READY`. Failures are visible to administrators and audited.
+
+Only `ADMIN` or `SUPER_ADMIN` principals with an explicit `recordings:read` permission may request playback. The API never returns bucket credentials or public object URLs; it issues a single-purpose signed URL with a two-minute maximum TTL after recording an access reason, administrator, time, and IP hash. Exports remain disabled by default. Object-storage policy denies all direct user and public access.
+
+Default retention is 30 days, followed by cryptographic deletion and a tombstone/audit record. Legal hold, if introduced, must require a separately privileged, audited workflow. Production deployment must enforce jurisdiction-appropriate notice or consent before media capture begins; if affirmative consent is required, the call cannot connect until every participant grants it.
+
+## Security checklist
+
+- E.164 normalization and unique phone index; Argon2id if passwords are ever added
+- Zod/Valibot DTO validation, parameterized ORM queries, CSP, output encoding
+- Origin checks and CSRF tokens for cookie-authenticated state changes
+- OTP/login rate limits in Redis; progressive cooldown and abuse alerting
+- Session/device inventory, refresh rotation, forced logout, secure cookies
+- Conversation membership and block/privacy checks on every request/event
+- Admin RBAC plus immutable append-only audit records for sensitive actions
+- Separate `recordings:read` authorization; signed playback URLs, no shared storage credentials
+- KMS envelope encryption, private bucket policy, checksum verification, lifecycle deletion
+- Persistent in-call recording indicator and deployment-specific consent/notice enforcement
+- Secrets from a managed secret store; no credentials in images or Git
+- Upload content-type/size scanning when attachments arrive
+- Dependency, SAST, authorization, and abuse-case tests in CI
+
+## Scaling
+
+Keep API replicas stateless. The load balancer terminates TLS and supports WebSocket upgrades; sticky sessions are optional because socket identity/routing and pub/sub live in Redis. PostgreSQL uses read replicas for admin/reporting queries, partitioned message/audit tables at scale, and connection pooling. WebRTC remains P2P; autoscaled Coturn handles relay traffic separately.
+
+## Backup and recovery
+
+- PostgreSQL: encrypted daily snapshots plus continuous WAL archiving; quarterly restore drills
+- Redis: not the system of record; AOF for graceful recovery, but rebuild presence after reconnect
+- Object storage: private bucket, versioning where policy allows, 30-day lifecycle, separate KMS keys; backups must honor recording deletion policy
+- Define RPO/RTO, test regional recovery, and redact/de-identify nonproduction copies
+
+## Coturn deployment
+
+Run Coturn on public UDP/TCP 3478 and TLS 5349, with relay UDP ports 49160–49200 open. Use a dedicated hostname/certificate, long-term credential mechanism or time-limited HMAC credentials, `no-loopback-peers`, bandwidth limits, and metrics. Set `STUN_SERVER`, `TURN_SERVER`, `TURN_USERNAME`, and `TURN_PASSWORD` only through the secret/config system. Test restrictive enterprise and carrier-NAT networks before production.

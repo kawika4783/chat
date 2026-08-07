@@ -1,0 +1,12 @@
+.git
+.github
+.env
+.npm-cache
+node_modules
+dist
+work
+*.log
+docker-compose.yml
+README.md
+design-concepts
+docs

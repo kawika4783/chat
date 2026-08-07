@@ -1,0 +1,158 @@
+name: halo
+
+services:
+  web:
+    image: ${HALO_WEB_IMAGE:-halo-web:local}
+    build:
+      context: .
+      dockerfile: infrastructure/docker/web.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-8080}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks: [halo]
+
+  api:
+    image: ${HALO_API_IMAGE:-halo-api:local}
+    build:
+      context: .
+      dockerfile: infrastructure/docker/api.Dockerfile
+    restart: unless-stopped
+    expose: ["3001"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-halo}:${POSTGRES_PASSWORD:-halo_change_me}@postgres:5432/${POSTGRES_DB:-halo}
+      REDIS_URL: redis://redis:6379
+      OTP_MODE: ${OTP_MODE:-mock}
+      MOCK_OTP_CODE: ${MOCK_OTP_CODE:-147296}
+      SESSION_SECRET: ${SESSION_SECRET:-change-me-before-production}
+      STUN_SERVER: ${STUN_SERVER:-stun:stun.l.google.com:19302}
+      TURN_SERVER: ${TURN_SERVER:-turn:turn.example.com:3478}
+      TURN_USERNAME: ${TURN_USERNAME:-replace-me}
+      TURN_PASSWORD: ${TURN_PASSWORD:-replace-me}
+      VIDEO_RECORDING_ENABLED: ${VIDEO_RECORDING_ENABLED:-true}
+      RECORDING_STORAGE_ENDPOINT: http://object-storage:9000
+      RECORDING_BUCKET: ${RECORDING_BUCKET:-halo-video-recordings}
+      RECORDING_SIGNED_URL_TTL_SECONDS: ${RECORDING_SIGNED_URL_TTL_SECONDS:-120}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      recording-bucket-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks: [halo]
+
+  recording-worker:
+    image: ${HALO_RECORDER_IMAGE:-halo-recording-worker:local}
+    build:
+      context: .
+      dockerfile: infrastructure/docker/recording-worker.Dockerfile
+    restart: unless-stopped
+    expose: ["3002"]
+    environment:
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+      RECORDING_STORAGE_ENDPOINT: http://object-storage:9000
+      RECORDING_BUCKET: ${RECORDING_BUCKET:-halo-video-recordings}
+      RECORDING_STORAGE_ACCESS_KEY: ${RECORDING_STORAGE_ACCESS_KEY:-halo_recordings}
+      RECORDING_STORAGE_SECRET_KEY: ${RECORDING_STORAGE_SECRET_KEY:-halo_recordings_change_me}
+      RECORDING_RETENTION_DAYS: ${VIDEO_RECORDING_RETENTION_DAYS:-30}
+      RECORDING_KMS_KEY_ID: ${RECORDING_KMS_KEY_ID:-development-key-placeholder}
+    depends_on:
+      redis:
+        condition: service_healthy
+      recording-bucket-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks: [halo]
+
+  object-storage:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${RECORDING_STORAGE_ACCESS_KEY:-halo_recordings}
+      MINIO_ROOT_PASSWORD: ${RECORDING_STORAGE_SECRET_KEY:-halo_recordings_change_me}
+    volumes:
+      - halo_recordings:/data
+    ports:
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
+    networks: [halo]
+
+  recording-bucket-init:
+    image: minio/mc:RELEASE.2025-07-21T05-28-08Z
+    restart: "no"
+    depends_on: [object-storage]
+    environment:
+      MINIO_ROOT_USER: ${RECORDING_STORAGE_ACCESS_KEY:-halo_recordings}
+      MINIO_ROOT_PASSWORD: ${RECORDING_STORAGE_SECRET_KEY:-halo_recordings_change_me}
+      RECORDING_BUCKET: ${RECORDING_BUCKET:-halo-video-recordings}
+      RECORDING_RETENTION_DAYS: ${VIDEO_RECORDING_RETENTION_DAYS:-30}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        until mc alias set halo http://object-storage:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do sleep 2; done;
+        mc mb --ignore-existing "halo/$${RECORDING_BUCKET}";
+        mc anonymous set none "halo/$${RECORDING_BUCKET}";
+        mc ilm rule add --expire-days "$${RECORDING_RETENTION_DAYS}" "halo/$${RECORDING_BUCKET}" || true;
+        echo "Private recording bucket is ready";
+    networks: [halo]
+
+  postgres:
+    image: postgres:17.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-halo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-halo_change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-halo}
+    volumes:
+      - halo_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks: [halo]
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - halo_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [halo]
+
+networks:
+  halo:
+    driver: bridge
+
+volumes:
+  halo_postgres:
+  halo_redis:
+  halo_recordings:

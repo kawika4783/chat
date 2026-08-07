@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, LockKeyhole, LogOut, MessageCircle, Mic, MicOff, Phone, PhoneOff, Play, RefreshCw, Search, Send, ShieldCheck, UserPlus, Video, VideoOff, Wifi, WifiOff, X } from 'lucide-react';
 import { io } from 'socket.io-client';
+import { createClientId } from './clientId.js';
 
 async function api(path, options = {}) {
   const response = await fetch(`/api${path}`, {
@@ -378,7 +379,7 @@ function LiveMessenger({ user, onLogout }) {
     try {
       await api(`/conversations/${selectedId}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ text, clientId: crypto.randomUUID().replaceAll('-', '') }),
+        body: JSON.stringify({ text, clientId: createClientId() }),
       });
     } catch (sendError) {
       setDraft(text); setError(sendError.message);

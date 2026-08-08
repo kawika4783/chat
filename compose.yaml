@@ -11,7 +11,6 @@ services:
       - "${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-8080}:8080"
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik-proxy}"
       - "traefik.http.routers.halo-web.rule=Host(`${HALO_DOMAIN:-808hub.net}`) || Host(`${HALO_CHAT_DOMAIN:-chat.808hub.net}`)"
       - "traefik.http.routers.halo-web.entrypoints=${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}"
       - "traefik.http.routers.halo-web.tls=true"
@@ -35,7 +34,7 @@ services:
       timeout: 3s
       retries: 10
       start_period: 10s
-    networks: [halo, traefik-proxy]
+    networks: [halo]
 
   api:
     image: ${HALO_API_IMAGE:-halo-api:local}
@@ -112,7 +111,6 @@ services:
       - "${LIVEKIT_RTC_BIND_ADDRESS:-0.0.0.0}:50000-50100:50000-50100/udp"
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik-proxy}"
       - "traefik.http.routers.halo-livekit.rule=Host(`${LIVEKIT_DOMAIN:-livekit.808hub.net}`)"
       - "traefik.http.routers.halo-livekit.entrypoints=${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}"
       - "traefik.http.routers.halo-livekit.tls=true"
@@ -122,7 +120,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    networks: [halo, traefik-proxy]
+    networks: [halo]
 
   livekit-egress:
     image: livekit/egress:v1.12.0
@@ -161,14 +159,13 @@ services:
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     labels:
       - "traefik.enable=true"
-      - "traefik.docker.network=${TRAEFIK_NETWORK:-traefik-proxy}"
       - "traefik.http.routers.halo-recordings.rule=Host(`${HALO_DOMAIN:-808hub.net}`) && PathPrefix(`/${RECORDING_BUCKET:-halo-video-recordings}`)"
       - "traefik.http.routers.halo-recordings.entrypoints=${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}"
       - "traefik.http.routers.halo-recordings.tls=true"
       - "traefik.http.routers.halo-recordings.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
       - "traefik.http.routers.halo-recordings.middlewares=halo-security-headers"
       - "traefik.http.services.halo-recordings.loadbalancer.server.port=9000"
-    networks: [halo, traefik-proxy]
+    networks: [halo]
 
   recording-bucket-init:
     image: minio/mc:RELEASE.2025-07-21T05-28-08Z
@@ -222,9 +219,6 @@ services:
 networks:
   halo:
     driver: bridge
-  traefik-proxy:
-    external: true
-    name: ${TRAEFIK_NETWORK:-traefik-proxy}
 
 volumes:
   halo_postgres:

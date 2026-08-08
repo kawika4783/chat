@@ -38,9 +38,9 @@ docker compose logs -f --tail=100
 
 The Hostinger deployment is routed by the existing `traefik` project. The canonical production URLs are `https://808hub.net` (also `https://chat.808hub.net`) and `wss://livekit.808hub.net`. Traefik terminates TLS and automatically obtains certificates through its `letsencrypt` resolver. The recording vault is at `https://808hub.net/admin`.
 
-The `web`, `livekit`, and `object-storage` services join Hostinger's external `traefik-proxy` network. Keep `7881/tcp` and `50000-50100/udp` open for LiveKit media, while ports `8080`, `7880`, `9000`, and `9001` remain loopback-only. Short-lived, signed recording paths are routed to the private MinIO bucket through the main HTTPS hostname; unsigned objects remain inaccessible.
+Hostinger's Traefik service uses host networking and discovers the Halo services through Docker's provider, so Halo remains isolated on its own bridge network. Keep `7881/tcp` and `50000-50100/udp` open for LiveKit media, while ports `8080`, `7880`, `9000`, and `9001` remain loopback-only. Short-lived, signed recording paths are routed to the private MinIO bucket through the main HTTPS hostname; unsigned objects remain inaccessible.
 
-For a local-only installation without Hostinger Traefik, create an external network once with `docker network create traefik-proxy`, and override `COOKIE_SECURE=false`, `LIVEKIT_PUBLIC_URL=ws://localhost:7880`, and `RECORDING_PUBLIC_ENDPOINT=http://localhost:9000` in `.env`.
+For a local-only installation without Hostinger Traefik, override `COOKIE_SECURE=false`, `LIVEKIT_PUBLIC_URL=ws://localhost:7880`, and `RECORDING_PUBLIC_ENDPOINT=http://localhost:9000` in `.env`.
 
 ## Publish and pull with GHCR
 

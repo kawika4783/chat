@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, LockKeyhole, LogOut, MessageCircle, Mic, MicOff, Phone, PhoneOff, Play, RefreshCw, Search, Send, ShieldCheck, UserPlus, Video, VideoOff, Wifi, WifiOff, X } from 'lucide-react';
+import { ArrowLeft, Camera, LockKeyhole, LogOut, MessageCircle, Mic, MicOff, Phone, PhoneOff, Play, RefreshCw, Search, Send, ShieldCheck, UserPlus, Video, VideoOff, Wifi, WifiOff, X } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { createClientId } from './clientId.js';
 
@@ -103,7 +103,75 @@ function emitWithAck(socket, event, payload) {
   });
 }
 
-function useCallController(socket, user, onError) {
+function useAudioAlerts() {
+  const contextRef = useRef(null);
+  const ringtoneTimerRef = useRef(null);
+
+  const getContext = useCallback(() => {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return null;
+    if (!contextRef.current) contextRef.current = new AudioContext();
+    if (contextRef.current.state === 'suspended') contextRef.current.resume().catch(() => {});
+    return contextRef.current;
+  }, []);
+
+  const beep = useCallback((frequency, delay = 0, duration = 0.16, volume = 0.075) => {
+    const context = getContext();
+    if (!context) return;
+    const start = context.currentTime + delay;
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(frequency, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(volume, start + 0.025);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    oscillator.connect(gain).connect(context.destination);
+    oscillator.start(start);
+    oscillator.stop(start + duration + 0.02);
+  }, [getContext]);
+
+  const stopRingtone = useCallback(() => {
+    clearInterval(ringtoneTimerRef.current);
+    ringtoneTimerRef.current = null;
+  }, []);
+
+  const startRingtone = useCallback(kind => {
+    stopRingtone();
+    const ring = () => {
+      if (kind === 'incoming') {
+        beep(659, 0, 0.22, 0.1);
+        beep(784, 0.28, 0.24, 0.1);
+      } else {
+        beep(440, 0, 0.22, 0.055);
+        beep(440, 0.34, 0.22, 0.055);
+      }
+    };
+    ring();
+    ringtoneTimerRef.current = setInterval(ring, kind === 'incoming' ? 2200 : 2800);
+  }, [beep, stopRingtone]);
+
+  const playMessage = useCallback(() => {
+    beep(880, 0, 0.11, 0.055);
+    beep(1175, 0.12, 0.14, 0.05);
+  }, [beep]);
+
+  useEffect(() => {
+    const unlock = () => getContext();
+    window.addEventListener('pointerdown', unlock, { once: true, passive: true });
+    window.addEventListener('keydown', unlock, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+      stopRingtone();
+      contextRef.current?.close().catch(() => {});
+    };
+  }, [getContext, stopRingtone]);
+
+  return { startRingtone, stopRingtone, playMessage };
+}
+
+function useCallController(socket, user, onError, audioAlerts) {
   const [call, setCall] = useState(null);
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
@@ -119,6 +187,13 @@ function useCallController(socket, user, onError) {
   useEffect(() => { callRef.current = call; }, [call]);
   useEffect(() => { if (localVideoRef.current) localVideoRef.current.srcObject = localStream; }, [call, localStream]);
   useEffect(() => { if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream; }, [call, remoteStream]);
+
+  useEffect(() => {
+    if (call?.status === 'incoming') audioAlerts.startRingtone('incoming');
+    else if (call?.status === 'ringing') audioAlerts.startRingtone('outgoing');
+    else audioAlerts.stopRingtone();
+    return audioAlerts.stopRingtone;
+  }, [audioAlerts.startRingtone, audioAlerts.stopRingtone, call?.status]);
 
   const cleanup = useCallback(() => {
     callRef.current = null;
@@ -228,7 +303,11 @@ function useCallController(socket, user, onError) {
     };
     const onEnded = event => { if (callRef.current?.callId === event.callId) cleanup(); };
     const onRecordingStarted = event => { if (callRef.current?.callId === event.callId) setRecording(true); };
-    const onRecordingFailed = event => { if (callRef.current?.callId === event.callId) onError('Required video recording could not start'); };
+    const onRecordingFailed = event => {
+      if (callRef.current?.callId !== event.callId) return;
+      onError('Video recording is unavailable, so the call was ended for privacy. Please try again.');
+      endCall('recording-unavailable');
+    };
     socket.on('call:incoming', onIncoming);
     socket.on('call:accepted', onAccepted);
     socket.on('call:connected', onConnected);
@@ -294,11 +373,13 @@ function LiveMessenger({ user, onLogout }) {
   const [connected, setConnected] = useState(false);
   const [socket, setSocket] = useState(null);
   const [error, setError] = useState('');
+  const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const socketRef = useRef(null);
   const selectedIdRef = useRef(selectedId);
   const typingTimerRef = useRef(null);
   const showError = useCallback(message => setError(message), []);
-  const callController = useCallController(socket, user, showError);
+  const audioAlerts = useAudioAlerts();
+  const callController = useCallController(socket, user, showError, audioAlerts);
 
   useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
 
@@ -325,6 +406,7 @@ function LiveMessenger({ user, onLogout }) {
     socket.on('disconnect', () => setConnected(false));
     socket.on('connect_error', connectionError => setError(connectionError.message));
     socket.on('message:new', message => {
+      if (message.sender.id !== user.id) audioAlerts.playMessage();
       if (message.conversationId === selectedIdRef.current) {
         setMessages(current => current.some(item => item.id === message.id) ? current : [...current, message]);
       }
@@ -342,7 +424,7 @@ function LiveMessenger({ user, onLogout }) {
         : conversation));
     });
     return () => { socket.disconnect(); socketRef.current = null; setSocket(null); };
-  }, [loadConversations, user.id]);
+  }, [audioAlerts.playMessage, loadConversations, user.id]);
 
   useEffect(() => () => clearTimeout(typingTimerRef.current), []);
 
@@ -364,6 +446,7 @@ function LiveMessenger({ user, onLogout }) {
       const result = await api('/conversations/direct', { method: 'POST', body: JSON.stringify({ userId: targetId }) });
       await loadConversations();
       setSelectedId(result.conversation.id);
+      setMobileChatOpen(true);
       setQuery(''); setUsers([]);
     } catch (startError) {
       setError(startError.message);
@@ -403,11 +486,11 @@ function LiveMessenger({ user, onLogout }) {
       <div className="live-me"><LiveAvatar user={{ ...user, status: connected ? 'online' : 'offline' }} /><span><strong>{user.name}</strong><small>{connected ? <><Wifi size={12} /> Realtime connected</> : <><WifiOff size={12} /> Reconnecting</>}</small></span></div>
       <form className="live-search" onSubmit={searchUsers}><Search size={17} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Find people" /><button title="Search" disabled={searching}><UserPlus size={17} /></button></form>
       {users.length ? <div className="live-user-results">{users.map(result => <button key={result.id} onClick={() => startConversation(result.id)}><LiveAvatar user={result} size="sm" /><span><strong>{result.name}</strong><small>Halo member</small></span><MessageCircle size={17} /></button>)}</div> : null}
-      <div className="live-conversation-list">{conversations.map(conversation => <ConversationButton key={conversation.id} conversation={conversation} active={conversation.id === selectedId} onClick={() => setSelectedId(conversation.id)} />)}</div>
+      <div className="live-conversation-list">{conversations.map(conversation => <ConversationButton key={conversation.id} conversation={conversation} active={conversation.id === selectedId} onClick={() => { setSelectedId(conversation.id); setMobileChatOpen(true); }} />)}</div>
     </aside>
-    <section className="live-chat">
+    <section className={`live-chat${mobileChatOpen ? ' mobile-open' : ''}`}>
       {selected ? <>
-        <header><LiveAvatar user={selected.participant} /><span><strong>{selected.participant?.name}</strong><small>{selected.participant?.status || 'offline'}</small></span><div className="live-chat-actions"><button title="Voice call" onClick={() => callController.startCall(selected.participant, 'voice')}><Phone size={18} /></button><button title="Video call" onClick={() => callController.startCall(selected.participant, 'video')}><Video size={19} /></button></div></header>
+        <header><button className="live-mobile-back" type="button" onClick={() => setMobileChatOpen(false)} title="Back to conversations"><ArrowLeft size={21} /></button><LiveAvatar user={selected.participant} /><span><strong>{selected.participant?.name}</strong><small>{selected.participant?.status || 'offline'}</small></span><div className="live-chat-actions"><button title="Voice call" onClick={() => callController.startCall(selected.participant, 'voice')}><Phone size={18} /></button><button title="Video call" onClick={() => callController.startCall(selected.participant, 'video')}><Video size={19} /></button></div></header>
         <div className="live-messages" aria-live="polite">
           {messages.map(message => <article className={message.sender.id === user.id ? 'mine' : ''} key={message.id}><div>{message.text}</div><time>{new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></article>)}
           {typingUserId ? <div className="live-typing" aria-label={`${selected.participant?.name} is typing`}><i /><i /><i /></div> : null}

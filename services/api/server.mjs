@@ -28,7 +28,10 @@ const recordingTtlSeconds = Math.min(600, Math.max(30, Number(process.env.RECORD
 const recordingAccessKey = process.env.RECORDING_STORAGE_ACCESS_KEY || '';
 const recordingSecretKey = process.env.RECORDING_STORAGE_SECRET_KEY || '';
 const recordingPublicEndpoint = new URL(process.env.RECORDING_PUBLIC_ENDPOINT || 'http://localhost:9000');
-const egressClient = livekitApiKey && livekitApiSecret ? new EgressClient(livekitInternalUrl, livekitApiKey, livekitApiSecret) : null;
+const egressClient = livekitApiKey && livekitApiSecret
+  ? new EgressClient(livekitInternalUrl, livekitApiKey, livekitApiSecret, { requestTimeout: 30000 })
+  : null;
+const recordingStarts = new Map();
 
 if (process.env.NODE_ENV === 'production' && sessionSecret.length < 32) {
   throw new Error('SESSION_SECRET must contain at least 32 characters in production');
@@ -244,7 +247,7 @@ async function syncRecording(recording) {
   } });
 }
 
-async function startAutomaticRecording(call) {
+async function createAutomaticRecording(call) {
   if (!recordingEnabled || call.type !== 'VIDEO' || !egressClient) return null;
   const existing = await prisma.videoRecording.findFirst({ where: { callId: call.id, status: { notIn: ['FAILED', 'DELETED'] } } });
   if (existing) return existing;
@@ -275,6 +278,14 @@ async function startAutomaticRecording(call) {
     await prisma.videoRecording.update({ where: { id: recording.id }, data: { status: 'FAILED', errorMessage: String(error.message || error).slice(0, 1000) } });
     throw error;
   }
+}
+
+function startAutomaticRecording(call) {
+  const active = recordingStarts.get(call.id);
+  if (active) return active;
+  const pending = createAutomaticRecording(call).finally(() => recordingStarts.delete(call.id));
+  recordingStarts.set(call.id, pending);
+  return pending;
 }
 
 async function stopAutomaticRecording(callId) {

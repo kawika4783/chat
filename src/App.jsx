@@ -18,7 +18,7 @@ function Logo({ admin = false }) {
 
 function Avatar({ person, size = 'md', showStatus = true }) {
   return <span className={cx('avatar', `avatar-${size}`)}>
-    <img src={person.avatar} alt="" />
+    {person.avatar ? <img src={person.avatar} alt="" /> : person.name.split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase()}
     {showStatus && <i className={cx('presence', person.status)} aria-label={person.state} />}
   </span>;
 }
@@ -167,9 +167,9 @@ function CallScreen({ type, person, onEnd, setType }) {
   const active = ['voice-call','video-call'].includes(type); const video = type === 'video-call';
   const [muted,setMuted]=useState(false); const [camera,setCamera]=useState(true); const [speaker,setSpeaker]=useState(true);
   const title = type==='incoming-call'?'Incoming voice call':type==='outgoing-call'?'Calling…':active?'Connected':'Call';
-  return <div className={cx('call-screen', video && 'video')} style={video?{'--remote':`url(${person.avatar.replace('w=160&h=160','w=1200&h=1400')})`}:undefined}>
+  return <div className={cx('call-screen', video && 'video')} style={video&&person.avatar?{'--remote':`url(${person.avatar})`}:undefined}>
     <div className="call-top"><Logo/>{video && active && <span className="recording-indicator"><Circle size={9}/> Recording</span>}<button onClick={onEnd}><X size={21}/></button></div>{video && active && <div className="recording-notice"><Shield size={15}/> This video session is recorded automatically and available only to authorized administrators.</div>}<div className="call-center">{!video&&<Avatar person={person} size="call" showStatus={false}/>}<h1>{person.name}</h1><p>{title}{active&&<span> · 04:18</span>}</p>{type==='outgoing-call'&&<span className="ringing"><i/><i/><i/></span>}</div>
-    {video&&<div className="self-view" style={{backgroundImage:`url(${people[1].avatar.replace('w=160&h=160','w=420&h=520')})`}}><Camera size={18}/></div>}
+    {video&&<div className="self-view"><Camera size={18}/></div>}
     <div className="call-controls">{type==='incoming-call'?<><button className="call-control decline" onClick={onEnd}><PhoneOff/><span>Decline</span></button><button className="call-control accept" onClick={()=>setType('voice-call')}><Phone/><span>Accept</span></button></>:<><button className={cx('call-control',muted&&'control-active')} onClick={()=>setMuted(!muted)}>{muted?<MicOff/>:<Mic/>}<span>Mute</span></button>{video&&<button className={cx('call-control',!camera&&'control-active')} onClick={()=>setCamera(!camera)}>{camera?<Camera/>:<VideoOff/>}<span>Camera</span></button>}<button className={cx('call-control',speaker&&'control-active')} onClick={()=>setSpeaker(!speaker)}><Volume2/><span>Speaker</span></button><button className="call-control decline" onClick={onEnd}><PhoneOff/><span>End</span></button></>}</div>
   </div>;
 }
@@ -200,7 +200,7 @@ function AdminRecordings(){
     <div className="policy-banner recording-policy"><LockKeyhole/><span><strong>Encrypted and access-controlled</strong>Every view creates an audit event. Playback uses a short-lived signed URL; exports are disabled by default.</span></div>
     <div className="admin-filters"><label><Search/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search participant or recording ID"/></label><select><option>All statuses</option><option>Ready</option><option>Processing</option></select><button><Filter/> Date range</button></div>
     <div className="recording-list">{rows.map(r=><article className="recording-row" key={r.id}><div className="recording-thumb"><img src={r.participants[0].avatar} alt=""/><span><Film size={18}/></span></div><div className="recording-people"><strong>{r.participants.map(p=>p.name).join(' ↔ ')}</strong><small>{r.id} · {r.started}</small></div><div><small>Duration</small><strong>{r.duration}</strong></div><div><small>Storage</small><strong>{r.size}</strong></div><div><span className={cx('recording-status',r.status.toLowerCase())}>{r.status}</span><small>{r.retention}</small></div><button className="secondary" disabled={r.status!=='Ready'} onClick={()=>setSelected(r)}><Eye size={16}/> View</button></article>)}</div>
-    {selected&&<div className="recording-modal" role="dialog" aria-label="Recording player"><button className="modal-close" onClick={()=>setSelected(null)}><X/></button><div className="recording-player" style={{backgroundImage:`linear-gradient(180deg,rgba(8,7,12,.1),rgba(8,7,12,.7)),url(${selected.participants[0].avatar.replace('w=160&h=160','w=1200&h=800')})`}}><button aria-label="Play recording"><Play fill="currentColor"/></button><div className="player-meta"><span>00:00 / {selected.duration}</span><i><b/></i><strong><Circle size={8}/> Recorded automatically</strong></div></div><div className="recording-modal-info"><div><h2>{selected.participants.map(p=>p.name).join(' and ')}</h2><p>{selected.started} · {selected.id}</p></div><span><Shield size={16}/> Admin access logged</span></div></div>}
+    {selected&&<div className="recording-modal" role="dialog" aria-label="Recording player"><button className="modal-close" onClick={()=>setSelected(null)}><X/></button><div className="recording-player"><button aria-label="Play recording"><Play fill="currentColor"/></button><div className="player-meta"><span>00:00 / {selected.duration}</span><i><b/></i><strong><Circle size={8}/> Recorded automatically</strong></div></div><div className="recording-modal-info"><div><h2>{selected.participants.map(p=>p.name).join(' and ')}</h2><p>{selected.started} · {selected.id}</p></div><span><Shield size={16}/> Admin access logged</span></div></div>}
   </AdminPage>
 }
 

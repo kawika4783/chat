@@ -50,10 +50,6 @@ services:
       OTP_MODE: ${OTP_MODE:-mock}
       MOCK_OTP_CODE: ${MOCK_OTP_CODE:-147296}
       SESSION_SECRET: ${SESSION_SECRET:-change-me-before-production-with-32-bytes}
-      STUN_SERVER: ${STUN_SERVER:-stun:stun.l.google.com:19302}
-      TURN_SERVER: ${TURN_SERVER:-turn:turn.example.com:3478}
-      TURN_USERNAME: ${TURN_USERNAME:-replace-me}
-      TURN_PASSWORD: ${TURN_PASSWORD:-replace-me}
       VIDEO_RECORDING_ENABLED: ${VIDEO_RECORDING_ENABLED:-true}
       VIDEO_RECORDING_RETENTION_DAYS: ${VIDEO_RECORDING_RETENTION_DAYS:-30}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
@@ -100,15 +96,26 @@ services:
           tcp_port: 7881
           port_range_start: 50000
           port_range_end: 50100
-          use_external_ip: true
+          use_external_ip: false
+          node_ip: ${LIVEKIT_NODE_IP:-2.25.84.233}
+          stun_servers:
+            - ${LIVEKIT_DOMAIN:-livekit.808hub.net}:3478
         redis:
           address: redis:6379
         keys:
           ${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-development-livekit-secret-change-me}
+        turn:
+          enabled: true
+          domain: ${LIVEKIT_DOMAIN:-livekit.808hub.net}
+          udp_port: 3478
+          relay_range_start: 50101
+          relay_range_end: 50120
     ports:
       - "${LIVEKIT_HTTP_BIND_ADDRESS:-127.0.0.1}:${LIVEKIT_HTTP_PORT:-7880}:7880"
       - "${LIVEKIT_RTC_BIND_ADDRESS:-0.0.0.0}:${LIVEKIT_TCP_PORT:-7881}:7881/tcp"
+      - "${LIVEKIT_RTC_BIND_ADDRESS:-0.0.0.0}:${LIVEKIT_TURN_UDP_PORT:-3478}:3478/udp"
       - "${LIVEKIT_RTC_BIND_ADDRESS:-0.0.0.0}:50000-50100:50000-50100/udp"
+      - "${LIVEKIT_RTC_BIND_ADDRESS:-0.0.0.0}:50101-50120:50101-50120/udp"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.halo-livekit.rule=Host(`${LIVEKIT_DOMAIN:-livekit.808hub.net}`)"

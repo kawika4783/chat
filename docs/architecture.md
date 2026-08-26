@@ -6,14 +6,14 @@
 Browser/PWA
   ├─ HTTPS REST → API service (Fastify/NestJS)
   ├─ authenticated WebSocket → realtime gateway
-  ├─ WebRTC media → peer/Coturn for voice and ordinary transport
+  ├─ WebRTC media → self-hosted LiveKit SFU with embedded TURN/STUN
   └─ video media fork → SFU/recording worker → encrypted object storage
                          │
 Load balancer ───────────┤
   ├─ API/gateway replicas│
   ├─ PostgreSQL          │ durable users, conversations, messages, calls, audit
   ├─ Redis               │ presence TTLs, socket routing, rate limits, pub/sub
-  ├─ SMSProvider         │ Mock/Twilio/SNS/Vonage adapter
+  ├─ local OTP store     │ self-hosted development-code authentication
   ├─ object storage      │ encrypted video recordings and future attachments
   └─ recording worker    │ authorized SFU media fork, packaging, retention
 ```
@@ -22,11 +22,11 @@ The web app never trusts frontend IDs. Each REST handler and socket event derive
 
 ## Authentication
 
-1. `POST /auth/otp/request` normalizes an E.164 phone number, applies per-phone/IP/device throttles, stores a hashed short-lived code, and dispatches via `SMSProvider`.
+1. `POST /auth/otp/request` normalizes an E.164 phone number, applies per-phone/IP/device throttles, and stores a hashed short-lived code. In the current self-hosted mode, the browser displays the development code rather than contacting an SMS provider.
 2. `POST /auth/otp/verify` consumes one valid code and creates/locates the unique user.
 3. Server issues a short-lived access token plus rotating refresh token in `HttpOnly`, `Secure`, `SameSite=Lax` cookies. Reuse detection revokes the token family.
 4. WebSockets authenticate during handshake and re-authorize every sensitive event.
-5. `MockSMSProvider` accepts only development/test mode and must be impossible to enable in production.
+5. This self-hosted development-code flow is convenient but is not strong proof that a user controls the phone number. Strong phone verification requires a carrier connection, an SMS provider, or a locally attached cellular modem.
 
 Provider interface: `sendOtp({ e164Phone, code, locale, expiresAt }): Promise<ProviderReceipt>`.
 
@@ -79,6 +79,6 @@ Keep API replicas stateless. The load balancer terminates TLS and supports WebSo
 - Object storage: private bucket, versioning where policy allows, 30-day lifecycle, separate KMS keys; backups must honor recording deletion policy
 - Define RPO/RTO, test regional recovery, and redact/de-identify nonproduction copies
 
-## Coturn deployment
+## Self-hosted ICE and TURN
 
-Run Coturn on public UDP/TCP 3478 and TLS 5349, with relay UDP ports 49160–49200 open. Use a dedicated hostname/certificate, long-term credential mechanism or time-limited HMAC credentials, `no-loopback-peers`, bandwidth limits, and metrics. Set `STUN_SERVER`, `TURN_SERVER`, `TURN_USERNAME`, and `TURN_PASSWORD` only through the secret/config system. Test restrictive enterprise and carrier-NAT networks before production.
+LiveKit's embedded TURN/UDP service is enabled on public UDP 3478 and also provides STUN. The SFU advertises the configured `LIVEKIT_NODE_IP` directly, so it does not use an external STUN provider to discover the VPS address. RTC media uses UDP 50000–50100 and TURN relay traffic uses UDP 50101–50120. Open those ranges in the VPS firewall. TURN/TLS can be added later with a dedicated self-hosted certificate and layer-4 TCP listener for the most restrictive corporate networks.

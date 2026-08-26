@@ -2,11 +2,11 @@ listening-port=3478
 tls-listening-port=5349
 fingerprint
 lt-cred-mech
-realm=turn.example.com
+realm=livekit.808hub.net
 user=replace-user:replace-password
 no-multicast-peers
 no-loopback-peers
 stale-nonce=600
-min-port=49160
-max-port=49200
+min-port=50101
+max-port=50120
 # Production: configure cert=/path/fullchain.pem and pkey=/path/privkey.pem.

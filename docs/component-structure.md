@@ -29,7 +29,7 @@ App
 - Accent: orchid `#6b35da`; selected state `#f1ebff`
 - Semantic: success `#31b862`, destructive `#f24d57`
 - Radius: 10, 14, 18, 24px; circular icon buttons
-- Type: DM Sans, system fallback; 11–14px chrome, 22–38px headings
+- Type: local operating-system sans-serif stack; 11–14px chrome, 22–38px headings
 - Icons: consistent two-pixel rounded Lucide outlines
 - Containers: open rails/lists/tables, one framed chat composer, restrained drawers/popovers
 

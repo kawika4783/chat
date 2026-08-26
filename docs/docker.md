@@ -27,7 +27,7 @@ cd chat
 cp .env.example .env
 ```
 
-Edit `.env`. At minimum, replace `POSTGRES_PASSWORD`, `SESSION_SECRET`, both LiveKit credentials, `RECORDING_STORAGE_SECRET_KEY`, TURN credentials, and the KMS placeholder. To create the first administrator, temporarily set `ADMIN_BOOTSTRAP_ENABLED=true`, set `BOOTSTRAP_ADMIN_USERNAME`, and inject `BOOTSTRAP_ADMIN_PASSWORD` (or its `_FILE` variant). Start once, then disable bootstrap. Never commit `.env` or the password. Then:
+Edit `.env`. At minimum, replace `POSTGRES_PASSWORD`, `SESSION_SECRET`, both LiveKit credentials, `RECORDING_STORAGE_SECRET_KEY`, `LIVEKIT_NODE_IP`, and the KMS placeholder. To create the first administrator, temporarily set `ADMIN_BOOTSTRAP_ENABLED=true`, set `BOOTSTRAP_ADMIN_USERNAME`, and inject `BOOTSTRAP_ADMIN_PASSWORD` (or its `_FILE` variant). Start once, then disable bootstrap. Never commit `.env` or the password. Then:
 
 ```bash
 docker compose config
@@ -89,4 +89,4 @@ docker compose down --volumes
 
 ## Current boundary
 
-The API applies committed Prisma migrations and provides real OTP sessions, direct conversations, persistent messages, presence, typing, LiveKit room authorization, automatic video recording, admin-only metadata, and audit-logged signed playback URLs. `OTP_MODE=mock` is for local evaluation only. Production still requires TLS, public LiveKit/TURN networking, managed secrets/KMS, consent policy, monitoring, backups, and a formal security review.
+The API applies committed Prisma migrations and provides OTP sessions, direct conversations, persistent messages, presence, typing, LiveKit room authorization, automatic video recording, admin-only metadata, and audit-logged signed playback URLs. The current self-hosted `OTP_MODE=mock` displays the code in the browser and must not be treated as strong identity verification. Real SMS delivery inherently requires either a carrier/SMS provider or a locally attached cellular modem. Production still requires managed secrets/KMS, consent policy, monitoring, backups, and a formal security review.

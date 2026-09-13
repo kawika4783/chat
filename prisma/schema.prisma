@@ -151,11 +151,12 @@ model Device {
 }
 
 model Contact {
-  ownerId   String
-  contactId String
-  createdAt DateTime @default(now())
-  owner     User     @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  contact   User     @relation("ContactTarget", fields: [contactId], references: [id], onDelete: Cascade)
+  ownerId         String
+  contactId       String
+  customAvatarUrl String?
+  createdAt       DateTime @default(now())
+  owner           User     @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  contact         User     @relation("ContactTarget", fields: [contactId], references: [id], onDelete: Cascade)
 
   @@id([ownerId, contactId])
   @@index([contactId])

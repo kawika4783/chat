@@ -15,9 +15,14 @@ Nginx exposes these endpoints below `/api`; the API service receives the paths w
 | GET | `/api/calls/:id/join` | Issue a short-lived LiveKit room token to a call participant |
 | GET | `/api/conversations` | List the current user's direct conversations |
 | POST | `/api/conversations/direct` | Idempotently create a direct conversation with `userId` |
+| PUT | `/api/contacts/:id/photo` | Resize/store an authenticated user's private per-contact photo |
 | GET | `/api/conversations/:id/messages` | Read up to 100 authorized persistent messages |
 | POST | `/api/conversations/:id/messages` | Persist text using `{ text, clientId }` and publish it realtime |
 | GET | `/api/admin/recordings` | Admin-only recording metadata and status refresh |
 | POST | `/api/admin/recordings/:id/playback-token` | Audit access and issue a short-lived private-object URL |
+| GET | `/api/admin/users` | Admin-only user and last-login inventory |
+| PATCH | `/api/admin/users/:id` | Validate and audit profile, login, role, or account-status edits |
+| GET | `/api/admin/login-activity` | Admin-only session/login report with hashed sources |
+| GET | `/api/admin/audit-log` | Admin-only administrative event report |
 
-The current API intentionally omits contacts, attachments, read receipts, account recovery, recording export/download controls, and administrative user management.
+Socket.IO call events include participant disconnect propagation plus participant-controlled `recording:start` and `recording:stop`. The current API intentionally omits general attachments, read receipts, account recovery, and recording export/download controls.

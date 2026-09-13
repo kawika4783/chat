@@ -44,9 +44,9 @@ This design is explicitly server-readable. It is not end-to-end encrypted. Intro
 
 ## Calls
 
-The API stores call authorization and metadata and issues short-lived, participant-scoped LiveKit room tokens. Socket.IO handles invite, ringing, accept, and end events; LiveKit handles WebRTC media. Because video sessions must be recorded automatically, every accepted video call uses the SFU and LiveKit Egress. A pure peer-to-peer server cannot reliably create a central recording.
+The API stores call authorization and metadata and issues short-lived, participant-scoped LiveKit room tokens. Socket.IO handles invite, ringing, accept, end, and participant-disconnect events; LiveKit handles WebRTC media. Video capture requests adaptive 1080p at up to 30fps/3Mbps, while LiveKit can reduce quality when the device or network cannot sustain it.
 
-When a video call connects, the server creates a `VideoRecording` row and starts the recorder. The UI shows a persistent recording indicator and disclosure. The worker packages the composite or participant tracks, encrypts the object with a managed KMS key, writes it to a private bucket, records a checksum, and transitions `STARTING → RECORDING → PROCESSING → READY`. Failures are visible to administrators and audited.
+Recording is off when a video call connects. Either participant may deliberately start or stop it; successful start events notify both parties with a persistent in-call disclosure. The worker then packages the composite, writes it to the private bucket, and transitions `STARTING → RECORDING → PROCESSING → READY`. Failures do not end the call and remain visible to administrators.
 
 Only `ADMIN` or `SUPER_ADMIN` principals with an explicit `recordings:read` permission may request playback. The API never returns bucket credentials or public object URLs; it issues a single-purpose signed URL with a two-minute maximum TTL after recording an access reason, administrator, time, and IP hash. Exports remain disabled by default. Object-storage policy denies all direct user and public access.
 
@@ -63,7 +63,7 @@ Default retention is 30 days, followed by cryptographic deletion and a tombstone
 - Admin RBAC plus immutable append-only audit records for sensitive actions
 - Separate `recordings:read` authorization; signed playback URLs, no shared storage credentials
 - KMS envelope encryption, private bucket policy, checksum verification, lifecycle deletion
-- Persistent in-call recording indicator and deployment-specific consent/notice enforcement
+- Opt-in recording control, persistent in-call disclosure for both parties, and deployment-specific consent enforcement
 - Secrets from a managed secret store; no credentials in images or Git
 - Upload content-type/size scanning when attachments arrive
 - Dependency, SAST, authorization, and abuse-case tests in CI

@@ -14,7 +14,7 @@ const cookieSecure = process.env.COOKIE_SECURE === 'true';
 const sessionCookie = 'halo_session';
 const sessionLifetimeMs = 30 * 24 * 60 * 60 * 1000;
 const otpLifetimeMs = 5 * 60 * 1000;
-const maxJsonBytes = 32 * 1024;
+const maxJsonBytes = 96 * 1024;
 const otpRateLimit = new Map();
 const onlineConnections = new Map();
 const livekitApiKey = process.env.LIVEKIT_API_KEY || '';
@@ -171,6 +171,27 @@ function verifyPassword(password, encoded) {
 
 function isAdmin(user) {
   return ['ADMIN', 'SUPER_ADMIN'].includes(user?.role);
+}
+
+function adminUser(user) {
+  const latestSession = user.sessions?.[0];
+  return {
+    id: user.id,
+    name: user.profile?.displayName || (user.phoneE164 ? `Halo user ${user.phoneE164.slice(-4)}` : user.adminCredential?.username || 'Halo administrator'),
+    phone: user.phoneE164,
+    username: user.adminCredential?.username || null,
+    login: user.adminCredential?.username || user.phoneE164,
+    role: user.role,
+    status: user.disabledAt ? 'DISABLED' : user.suspendedUntil && user.suspendedUntil > new Date() ? 'SUSPENDED' : 'ACTIVE',
+    presence: user.profile?.presence || 'OFFLINE',
+    lastSeenAt: user.profile?.lastSeenAt,
+    lastLoginAt: latestSession?.createdAt || null,
+    createdAt: user.createdAt,
+  };
+}
+
+function auditMetadata(value) {
+  return JSON.parse(JSON.stringify(value, (_key, item) => item === undefined ? null : item));
 }
 
 async function bootstrapAdmin() {
@@ -341,13 +362,13 @@ function serializeMessage(message) {
   };
 }
 
-function serializeConversation(conversation, viewerId) {
+function serializeConversation(conversation, viewerId, contactAvatar = null) {
   const other = conversation.members.map(member => member.user).find(user => user.id !== viewerId) || conversation.members[0]?.user;
   return {
     id: conversation.id,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
-    participant: other ? publicUser(other) : null,
+    participant: other ? { ...publicUser(other), avatar: contactAvatar || publicUser(other).avatar } : null,
     lastMessage: conversation.messages?.[0] ? serializeMessage(conversation.messages[0]) : null,
   };
 }
@@ -365,7 +386,7 @@ async function route(req, res) {
 
   if (req.method === 'GET' && path === '/health') {
     await prisma.$queryRaw`SELECT 1`;
-    return json(res, 200, { ok: true, phase: 4, mode: 'sfu-with-automatic-recording', recordingEnabled });
+    return json(res, 200, { ok: true, phase: 5, mode: 'sfu-with-optional-recording', recordingEnabled });
   }
 
   if (req.method === 'POST' && path === '/auth/admin/login') {
@@ -455,7 +476,7 @@ async function route(req, res) {
     } });
     if (!call) return json(res, 404, { error: 'Active call not found' });
     const token = await issueRoomToken(call, auth.user);
-    return json(res, 200, { url: livekitPublicUrl, token, roomName: call.roomName, recordingRequired: recordingEnabled && call.type === 'VIDEO' });
+    return json(res, 200, { url: livekitPublicUrl, token, roomName: call.roomName, recordingAvailable: recordingEnabled && call.type === 'VIDEO' });
   }
 
   if (req.method === 'GET' && path === '/admin/recordings') {
@@ -474,6 +495,121 @@ async function route(req, res) {
       expiresAt: record.expiresAt,
       error: record.errorMessage,
     })) });
+  }
+
+  if (req.method === 'GET' && path === '/admin/users') {
+    if (!isAdmin(auth.user)) return json(res, 403, { error: 'Administrator access required' });
+    const query = (url.searchParams.get('query') || '').trim();
+    const role = (url.searchParams.get('role') || '').trim().toUpperCase();
+    const status = (url.searchParams.get('status') || '').trim().toUpperCase();
+    const conditions = [];
+    if (query) conditions.push({ OR: [
+        { phoneE164: { contains: query.replace(/\s/g, '') } },
+        { profile: { displayName: { contains: query, mode: 'insensitive' } } },
+        { adminCredential: { username: { contains: query.toLowerCase(), mode: 'insensitive' } } },
+    ] });
+    if (['USER', 'MODERATOR', 'ADMIN', 'SUPER_ADMIN'].includes(role)) conditions.push({ role });
+    if (status === 'DISABLED') conditions.push({ disabledAt: { not: null } });
+    if (status === 'SUSPENDED') conditions.push({ suspendedUntil: { gt: new Date() }, disabledAt: null });
+    if (status === 'ACTIVE') conditions.push({ disabledAt: null }, { OR: [{ suspendedUntil: null }, { suspendedUntil: { lte: new Date() } }] });
+    const where = conditions.length ? { AND: conditions } : {};
+    const users = await prisma.user.findMany({
+      where,
+      include: { profile: true, adminCredential: true, sessions: { orderBy: { createdAt: 'desc' }, take: 1 } },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    return json(res, 200, { users: users.map(adminUser) });
+  }
+
+  const adminUserMatch = path.match(/^\/admin\/users\/([^/]+)$/);
+  if (req.method === 'PATCH' && adminUserMatch) {
+    if (!isAdmin(auth.user)) return json(res, 403, { error: 'Administrator access required' });
+    const targetId = adminUserMatch[1];
+    const body = await readJson(req);
+    const target = await prisma.user.findUnique({ where: { id: targetId }, include: { profile: true, adminCredential: true, sessions: { orderBy: { createdAt: 'desc' }, take: 1 } } });
+    if (!target) return json(res, 404, { error: 'User not found' });
+
+    const name = String(body.name ?? target.profile?.displayName ?? '').trim().replace(/\s+/g, ' ');
+    if (name.length < 2 || name.length > 60) return json(res, 400, { error: 'Display name must contain 2 to 60 characters' });
+    const requestedRole = String(body.role ?? target.role).toUpperCase();
+    const allowedRoles = auth.user.role === 'SUPER_ADMIN' ? ['USER', 'MODERATOR', 'ADMIN', 'SUPER_ADMIN'] : ['USER', 'MODERATOR', 'ADMIN'];
+    if (!allowedRoles.includes(requestedRole)) return json(res, 400, { error: 'Invalid role' });
+    if (Boolean(target.adminCredential) !== ['ADMIN', 'SUPER_ADMIN'].includes(requestedRole)) {
+      return json(res, 400, { error: 'Changing administrator access requires separate credential provisioning' });
+    }
+    const requestedStatus = String(body.status ?? (target.disabledAt ? 'DISABLED' : 'ACTIVE')).toUpperCase();
+    if (!['ACTIVE', 'SUSPENDED', 'DISABLED'].includes(requestedStatus)) return json(res, 400, { error: 'Invalid account status' });
+    if (targetId === auth.user.id && (requestedStatus !== 'ACTIVE' || !['ADMIN', 'SUPER_ADMIN'].includes(requestedRole))) {
+      return json(res, 400, { error: 'You cannot disable, suspend, or demote your current administrator account' });
+    }
+    if (target.role === 'SUPER_ADMIN' && auth.user.role !== 'SUPER_ADMIN') return json(res, 403, { error: 'Only a super administrator can modify this account' });
+
+    let phone = target.phoneE164;
+    let username = target.adminCredential?.username || null;
+    const login = String(body.login ?? username ?? phone ?? '').trim();
+    if (['ADMIN', 'SUPER_ADMIN'].includes(requestedRole)) {
+      username = login.toLowerCase();
+      if (!/^[a-z0-9_.-]{4,60}$/.test(username)) return json(res, 400, { error: 'Administrator login must use 4 to 60 letters, numbers, dots, dashes, or underscores' });
+    } else {
+      phone = normalizePhone(login);
+      if (!phone) return json(res, 400, { error: 'User login must be a valid international phone number' });
+    }
+
+    const previous = adminUser(target);
+    try {
+      const updated = await prisma.$transaction(async tx => {
+        await tx.user.update({ where: { id: targetId }, data: {
+          role: requestedRole,
+          phoneE164: ['ADMIN', 'SUPER_ADMIN'].includes(requestedRole) ? target.phoneE164 : phone,
+          disabledAt: requestedStatus === 'DISABLED' ? target.disabledAt || new Date() : null,
+          suspendedUntil: requestedStatus === 'SUSPENDED' ? new Date(Date.now() + 7 * 86400000) : null,
+        } });
+        await tx.profile.upsert({ where: { userId: targetId }, update: { displayName: name }, create: { userId: targetId, displayName: name } });
+        if (target.adminCredential && ['ADMIN', 'SUPER_ADMIN'].includes(requestedRole)) {
+          await tx.adminCredential.update({ where: { userId: targetId }, data: { username } });
+        }
+        if (requestedStatus !== 'ACTIVE' && targetId !== auth.user.id) {
+          await tx.session.updateMany({ where: { userId: targetId, revokedAt: null }, data: { revokedAt: new Date() } });
+        }
+        await tx.adminAuditLog.create({ data: {
+          adminId: auth.user.id,
+          action: 'USER_UPDATED',
+          targetType: 'USER',
+          targetId,
+          metadata: auditMetadata({ before: { name: previous.name, login: previous.login, role: previous.role, status: previous.status }, after: { name, login, role: requestedRole, status: requestedStatus } }),
+          ipHash: hashToken(`${sessionSecret}:${clientIp(req)}`),
+        } });
+        return tx.user.findUnique({ where: { id: targetId }, include: { profile: true, adminCredential: true, sessions: { orderBy: { createdAt: 'desc' }, take: 1 } } });
+      });
+      return json(res, 200, { user: adminUser(updated) });
+    } catch (error) {
+      if (error.code === 'P2002') return json(res, 409, { error: 'That login is already assigned to another user' });
+      throw error;
+    }
+  }
+
+  if (req.method === 'GET' && path === '/admin/login-activity') {
+    if (!isAdmin(auth.user)) return json(res, 403, { error: 'Administrator access required' });
+    const sessions = await prisma.session.findMany({
+      include: { user: { include: { profile: true, adminCredential: true } } },
+      orderBy: { createdAt: 'desc' }, take: 250,
+    });
+    return json(res, 200, { logins: sessions.map(session => ({
+      id: session.id,
+      userId: session.userId,
+      user: adminUser({ ...session.user, sessions: [session] }),
+      timestamp: session.createdAt,
+      device: session.deviceId,
+      source: session.ipHash ? `Private hash ${session.ipHash.slice(0, 10)}` : 'Unavailable',
+      status: session.revokedAt ? 'REVOKED' : session.expiresAt <= new Date() ? 'EXPIRED' : 'ACTIVE',
+    })) });
+  }
+
+  if (req.method === 'GET' && path === '/admin/audit-log') {
+    if (!isAdmin(auth.user)) return json(res, 403, { error: 'Administrator access required' });
+    const events = await prisma.adminAuditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 250 });
+    return json(res, 200, { events });
   }
 
   const playbackMatch = path.match(/^\/admin\/recordings\/([^/]+)\/playback-token$/);
@@ -529,12 +665,19 @@ async function route(req, res) {
   }
 
   if (req.method === 'GET' && path === '/conversations') {
-    const memberships = await prisma.conversationMember.findMany({
-      where: { userId: auth.user.id },
-      include: { conversation: { include: conversationInclude } },
-      orderBy: { conversation: { updatedAt: 'desc' } },
-    });
-    return json(res, 200, { conversations: memberships.map(member => serializeConversation(member.conversation, auth.user.id)) });
+    const [memberships, contacts] = await Promise.all([
+      prisma.conversationMember.findMany({
+        where: { userId: auth.user.id },
+        include: { conversation: { include: conversationInclude } },
+        orderBy: { conversation: { updatedAt: 'desc' } },
+      }),
+      prisma.contact.findMany({ where: { ownerId: auth.user.id }, select: { contactId: true, customAvatarUrl: true } }),
+    ]);
+    const contactAvatars = new Map(contacts.map(contact => [contact.contactId, contact.customAvatarUrl]));
+    return json(res, 200, { conversations: memberships.map(member => {
+      const other = member.conversation.members.find(entry => entry.userId !== auth.user.id)?.user;
+      return serializeConversation(member.conversation, auth.user.id, contactAvatars.get(other?.id));
+    }) });
   }
 
   if (req.method === 'POST' && path === '/conversations/direct') {
@@ -547,11 +690,31 @@ async function route(req, res) {
     const conversation = await prisma.$transaction(async tx => {
       const record = await tx.conversation.upsert({ where: { directKey }, update: {}, create: { directKey } });
       await tx.conversationMember.createMany({ data: [{ conversationId: record.id, userId: auth.user.id }, { conversationId: record.id, userId: targetId }], skipDuplicates: true });
+      await tx.contact.createMany({ data: [{ ownerId: auth.user.id, contactId: targetId }, { ownerId: targetId, contactId: auth.user.id }], skipDuplicates: true });
       return tx.conversation.findUnique({ where: { id: record.id }, include: conversationInclude });
     });
     io.in(`user:${targetId}`).socketsJoin(`conversation:${conversation.id}`);
     io.in(`user:${auth.user.id}`).socketsJoin(`conversation:${conversation.id}`);
     return json(res, 201, { conversation: serializeConversation(conversation, auth.user.id) });
+  }
+
+  const contactPhotoMatch = path.match(/^\/contacts\/([^/]+)\/photo$/);
+  if (req.method === 'PUT' && contactPhotoMatch) {
+    const contactId = contactPhotoMatch[1];
+    if (contactId === auth.user.id) return json(res, 400, { error: 'Choose another user' });
+    const body = await readJson(req);
+    const photo = String(body.photo || '');
+    if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(photo) || photo.length > 80 * 1024) {
+      return json(res, 400, { error: 'Choose a JPEG, PNG, or WebP image under 60 KB after resizing' });
+    }
+    const contactUser = await prisma.user.findFirst({ where: { id: contactId, disabledAt: null }, select: { id: true } });
+    if (!contactUser) return json(res, 404, { error: 'Contact not found' });
+    const contact = await prisma.contact.upsert({
+      where: { ownerId_contactId: { ownerId: auth.user.id, contactId } },
+      create: { ownerId: auth.user.id, contactId, customAvatarUrl: photo },
+      update: { customAvatarUrl: photo },
+    });
+    return json(res, 200, { contactId, avatar: contact.customAvatarUrl });
   }
 
   const messageMatch = path.match(/^\/conversations\/([^/]+)\/messages$/);
@@ -623,6 +786,7 @@ io.use(async (socket, next) => {
 
 io.on('connection', async socket => {
   const userId = socket.data.user.id;
+  socket.data.activeCalls = new Set();
   socket.join(`user:${userId}`);
   const memberships = await prisma.conversationMember.findMany({ where: { userId }, select: { conversationId: true } });
   memberships.forEach(member => socket.join(`conversation:${member.conversationId}`));
@@ -674,6 +838,8 @@ io.on('connection', async socket => {
       });
       await prisma.call.update({ where: { id: call.id }, data: { roomName: roomNameFor(call.id) } });
       const event = { callId: call.id, type: type.toLowerCase(), caller: socket.data.user, startedAt: call.startedAt };
+      socket.data.activeCalls.add(call.id);
+      recipientSockets.forEach(recipientSocket => recipientSocket.data.activeCalls?.add(call.id));
       io.to(`user:${recipientId}`).emit('call:incoming', event);
       acknowledge({ ok: true, call: event });
     } catch (error) {
@@ -687,6 +853,7 @@ io.on('connection', async socket => {
       const call = await callForParticipant(payload?.callId);
       if (!call || call.recipientId !== userId || !['RINGING', 'CALLING'].includes(call.status)) return acknowledge({ ok: false, error: 'Call is no longer available' });
       const accepted = await prisma.call.update({ where: { id: call.id }, data: { status: 'ACCEPTED' } });
+      socket.data.activeCalls.add(call.id);
       io.to(`user:${call.callerId}`).emit('call:accepted', { callId: call.id, acceptedAt: new Date() });
       acknowledge({ ok: true, call: { callId: accepted.id, type: accepted.type.toLowerCase() } });
     } catch (error) {
@@ -700,6 +867,7 @@ io.on('connection', async socket => {
       const call = await callForParticipant(payload?.callId);
       if (!call || call.recipientId !== userId || !['RINGING', 'CALLING'].includes(call.status)) return acknowledge({ ok: false, error: 'Call is no longer available' });
       await prisma.call.update({ where: { id: call.id }, data: { status: 'REJECTED', endedAt: new Date() } });
+      socket.data.activeCalls.delete(call.id);
       io.to(`user:${call.callerId}`).emit('call:ended', { callId: call.id, reason: 'rejected' });
       acknowledge({ ok: true });
     } catch (error) {
@@ -733,19 +901,41 @@ io.on('connection', async socket => {
       const connectedCall = call.status !== 'CONNECTED'
         ? await prisma.call.update({ where: { id: call.id }, data: { status: 'CONNECTED', connectedAt } })
         : call;
-      if (connectedCall.type === 'VIDEO' && recordingEnabled) {
-        startAutomaticRecording(connectedCall).then(recording => {
-          if (recording) io.to(`user:${connectedCall.callerId}`).to(`user:${connectedCall.recipientId}`).emit('recording:started', { callId: connectedCall.id, recordingId: recording.id });
-        }).catch(error => {
-          console.error('Automatic recording failed', error);
-          io.to(`user:${connectedCall.callerId}`).to(`user:${connectedCall.recipientId}`).emit('recording:failed', { callId: connectedCall.id });
-        });
-      }
+      socket.data.activeCalls.add(connectedCall.id);
       io.to(`user:${otherParticipantId(call)}`).emit('call:connected', { callId: call.id, connectedAt });
       acknowledge({ ok: true });
     } catch (error) {
       console.error(error);
       acknowledge({ ok: false, error: 'Unable to connect call' });
+    }
+  });
+
+  socket.on('recording:start', async (payload, acknowledge = () => {}) => {
+    try {
+      if (!recordingEnabled) return acknowledge({ ok: false, error: 'Call recording is disabled on this server' });
+      const call = await callForParticipant(payload?.callId);
+      if (!call || call.type !== 'VIDEO' || call.status !== 'CONNECTED' || call.endedAt) return acknowledge({ ok: false, error: 'A connected video call is required' });
+      const recording = await startAutomaticRecording(call);
+      if (!recording) return acknowledge({ ok: false, error: 'Recording service is unavailable' });
+      const event = { callId: call.id, recordingId: recording.id, startedBy: socket.data.user };
+      io.to(`user:${call.callerId}`).to(`user:${call.recipientId}`).emit('recording:started', event);
+      acknowledge({ ok: true, recording: event });
+    } catch (error) {
+      console.error('Optional recording failed', error);
+      acknowledge({ ok: false, error: 'Unable to start recording' });
+    }
+  });
+
+  socket.on('recording:stop', async (payload, acknowledge = () => {}) => {
+    try {
+      const call = await callForParticipant(payload?.callId);
+      if (!call || call.type !== 'VIDEO') return acknowledge({ ok: false, error: 'Video call not found' });
+      await stopAutomaticRecording(call.id);
+      io.to(`user:${call.callerId}`).to(`user:${call.recipientId}`).emit('recording:stopped', { callId: call.id, stoppedBy: socket.data.user });
+      acknowledge({ ok: true });
+    } catch (error) {
+      console.error('Unable to stop optional recording', error);
+      acknowledge({ ok: false, error: 'Unable to stop recording' });
     }
   });
 
@@ -759,6 +949,7 @@ io.on('connection', async socket => {
         await prisma.call.update({ where: { id: call.id }, data: { status: call.connectedAt ? 'COMPLETED' : 'ENDED', endedAt, durationSeconds } });
       }
       await stopAutomaticRecording(call.id);
+      socket.data.activeCalls.delete(call.id);
       io.to(`user:${otherParticipantId(call)}`).emit('call:ended', { callId: call.id, reason: String(payload?.reason || 'ended').slice(0, 40) });
       acknowledge({ ok: true });
     } catch (error) {
@@ -768,6 +959,18 @@ io.on('connection', async socket => {
   });
 
   socket.on('disconnect', async () => {
+    const activeCallIds = [...socket.data.activeCalls];
+    if (activeCallIds.length) {
+      const calls = await prisma.call.findMany({ where: { id: { in: activeCallIds }, endedAt: null } });
+      await Promise.all(calls.map(async call => {
+        const endedAt = new Date();
+        const durationSeconds = call.connectedAt ? Math.max(0, Math.round((endedAt - call.connectedAt) / 1000)) : null;
+        await prisma.call.update({ where: { id: call.id }, data: { status: call.connectedAt ? 'COMPLETED' : 'ENDED', endedAt, durationSeconds } });
+        await stopAutomaticRecording(call.id);
+        const otherId = call.callerId === userId ? call.recipientId : call.callerId;
+        io.to(`user:${otherId}`).emit('call:ended', { callId: call.id, reason: 'participant-disconnected' });
+      }));
+    }
     const remaining = Math.max(0, (onlineConnections.get(userId) || 1) - 1);
     if (remaining) onlineConnections.set(userId, remaining);
     else {

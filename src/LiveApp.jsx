@@ -668,7 +668,7 @@ function AdminRecordingsView({ recordings, reason, setReason, onPlay, onRefresh 
 
 function AdminAppearance({ theme, background, setTheme, setBackground }) {
   const themes = [['light', Sun, 'Light'], ['dark', Moon, 'Dark'], ['system', Monitor, 'System']];
-  const backgrounds = [['lavender', 'Lavender'], ['mist', 'Mist'], ['paper', 'Paper']];
+  const backgrounds = [['midnight', 'Midnight'], ['ocean', 'Deep ocean'], ['carbon', 'Carbon']];
   return <><div className="admin-page-heading"><div><h1>Appearance</h1><p>Choose how this admin dashboard looks on this browser.</p></div></div><section className="admin-appearance-section"><h2>Theme</h2><div className="admin-choice-grid">{themes.map(([id, Icon, label]) => <button key={id} className={theme === id ? 'selected' : ''} onClick={() => setTheme(id)}><Icon size={22} /><strong>{label}</strong>{theme === id ? <Check size={16} /> : null}</button>)}</div><h2>Background</h2><div className="admin-background-grid">{backgrounds.map(([id, label]) => <button key={id} className={background === id ? `selected ${id}` : id} onClick={() => setBackground(id)}><i /><strong>{label}</strong>{background === id ? <Check size={16} /> : null}</button>)}</div></section></>;
 }
 
@@ -694,8 +694,8 @@ function AdminDashboard({ user, onLogout }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(true);
   const [navOpen, setNavOpen] = useState(false);
-  const [theme, setThemeState] = useState(() => localStorage.getItem('halo-admin-theme-v1') || 'system');
-  const [background, setBackgroundState] = useState(() => localStorage.getItem('halo-admin-background-v1') || 'lavender');
+  const [theme, setThemeState] = useState(() => localStorage.getItem('halo-admin-theme-v2') || 'dark');
+  const [background, setBackgroundState] = useState(() => localStorage.getItem('halo-admin-background-v2') || 'midnight');
   const load = useCallback(async () => {
     setBusy(true); setError('');
     try {
@@ -705,8 +705,8 @@ function AdminDashboard({ user, onLogout }) {
     finally { setBusy(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
-  const setTheme = value => { setThemeState(value); localStorage.setItem('halo-admin-theme-v1', value); };
-  const setBackground = value => { setBackgroundState(value); localStorage.setItem('halo-admin-background-v1', value); };
+  const setTheme = value => { setThemeState(value); localStorage.setItem('halo-admin-theme-v2', value); };
+  const setBackground = value => { setBackgroundState(value); localStorage.setItem('halo-admin-background-v2', value); };
   const play = async id => {
     setError('');
     try { const result = await api(`/admin/recordings/${id}/playback-token`, { method: 'POST', body: JSON.stringify({ reason }) }); setPlaybackUrl(result.playbackUrl); }

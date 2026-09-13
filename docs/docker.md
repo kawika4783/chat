@@ -9,7 +9,7 @@
 | `web` | Nginx serving the production Vite bundle and proxying `/api` | `${WEB_PORT:-8080}` |
 | `api` | Authentication, messaging, call authorization, recording/admin API | Internal only |
 | `livekit` | WebRTC SFU and room signaling | `7880`, `7881/tcp`, `50000-50100/udp` |
-| `livekit-egress` | Automatic composite MP4 capture | Internal only |
+| `livekit-egress` | Participant-requested composite MP4 capture | Internal only |
 | `postgres` | Durable relational data | Internal only |
 | `redis` | Presence, routing, queues, and rate-limit state | Internal only |
 | `object-storage` | Private recording objects | API/console bound to loopback on `9000`/`9001` |
@@ -89,4 +89,4 @@ docker compose down --volumes
 
 ## Current boundary
 
-The API applies committed Prisma migrations and provides OTP sessions, direct conversations, persistent messages, presence, typing, LiveKit room authorization, automatic video recording, admin-only metadata, and audit-logged signed playback URLs. The current self-hosted `OTP_MODE=mock` displays the code in the browser and must not be treated as strong identity verification. Real SMS delivery inherently requires either a carrier/SMS provider or a locally attached cellular modem. Production still requires managed secrets/KMS, consent policy, monitoring, backups, and a formal security review.
+The API applies committed Prisma migrations and provides OTP sessions, direct conversations, persistent messages, per-contact photos, presence, typing, synchronized call disconnects, LiveKit room authorization, participant-controlled video recording with peer disclosure, admin user/login reports, and audit-logged signed playback URLs. The current self-hosted `OTP_MODE=mock` displays the code in the browser and must not be treated as strong identity verification. Real SMS delivery inherently requires either a carrier/SMS provider or a locally attached cellular modem. Production still requires managed secrets/KMS, consent policy, monitoring, backups, and a formal security review.

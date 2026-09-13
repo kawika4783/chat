@@ -105,6 +105,7 @@ test('two users exchange messages, typing state, and an authorized call lifecycl
     assert.equal(roomJoin.response.status, 200);
     assert.match(roomJoin.body.url, /^wss?:\/\//);
     assert.ok(roomJoin.body.token.length > 100);
+    assert.equal(roomJoin.body.recordingAvailable, false);
 
     const forbiddenRecordings = await aliceClient.request('/admin/recordings');
     assert.equal(forbiddenRecordings.response.status, 403);
@@ -135,6 +136,16 @@ test('two users exchange messages, typing state, and an authorized call lifecycl
     const callHistory = await aliceClient.request('/calls');
     assert.equal(callHistory.response.status, 200);
     assert.ok(callHistory.body.calls.some(call => call.id === incoming.callId && call.status === 'COMPLETED'));
+
+    const disconnectIncomingPromise = once(bobSocket, 'call:incoming');
+    const disconnectCall = await emitAck(aliceSocket, 'call:initiate', { recipientId: bob.id, type: 'voice' });
+    await disconnectIncomingPromise;
+    const disconnectAcceptedPromise = once(aliceSocket, 'call:accepted');
+    await emitAck(bobSocket, 'call:accept', { callId: disconnectCall.call.callId });
+    await disconnectAcceptedPromise;
+    const peerEndedPromise = once(bobSocket, 'call:ended');
+    aliceSocket.disconnect();
+    assert.equal((await peerEndedPromise).reason, 'participant-disconnected');
   } finally {
     aliceSocket.disconnect();
     bobSocket.disconnect();

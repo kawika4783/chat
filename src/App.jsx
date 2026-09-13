@@ -229,7 +229,7 @@ function DesignPreview({ state, setState, dark, setDark }) {
 
 export default function App(){
   const params=new URLSearchParams(location.search); const previewPath=location.pathname==='/design-preview';
-  const [state,setState]=useState(params.get('state')||(previewPath?'chat':(location.pathname.startsWith('/admin')?'admin':'login'))); const [dark,setDark]=useState(false);
+  const [state,setState]=useState(params.get('state')||(previewPath?'chat':(location.pathname.startsWith('/admin')?'admin':'login'))); const [dark,setDark]=useState(true);
   useEffect(()=>{document.documentElement.dataset.theme=dark?'dark':'light'},[dark]);
   useEffect(()=>{if(previewPath){const url=new URL(location.href);url.searchParams.set('state',state);history.replaceState({},'',url)}},[state]);
   if(previewPath) return <DesignPreview state={state} setState={setState} dark={dark} setDark={setDark}/>;

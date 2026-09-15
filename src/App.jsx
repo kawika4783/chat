@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Activity, ArrowLeft, Bell, BellRing, Camera, Check, CheckCheck, ChevronDown, ChevronLeft,
+  Activity, ArrowLeft, Bell, BellRing, Camera, Check, CheckCheck, ChevronDown, ChevronLeft, FileImage,
   Clock3, Copy, EllipsisVertical, FileText, Headphones, LogOut, Menu, MessageCircle, MessageSquare,
   Mic, MicOff, Moon, MoreHorizontal, Paperclip, Phone, PhoneCall, PhoneIncoming, PhoneOff, Plus,
   Search, Send, Settings, Shield, Smile, Sparkles, Sun, User, UserPlus, Users, Video, VideoOff,
@@ -84,6 +84,8 @@ function MessageBubble({ message, person }) {
 
 function ChatPanel({ person, messages, setMessages, openCall, notificationsOpen, setNotificationsOpen, onMobileBack }) {
   const [draft, setDraft] = useState('');
+  const [gifOpen, setGifOpen] = useState(false);
+  const [effectsOpen, setEffectsOpen] = useState(false);
   const send = () => { if (!draft.trim()) return; setMessages(m => [...m, { id: Date.now(), from: 'me', text: draft.trim(), time: 'Now', read: false }]); setDraft(''); };
   return <section className="chat-panel">
     <header className="chat-header">
@@ -91,6 +93,7 @@ function ChatPanel({ person, messages, setMessages, openCall, notificationsOpen,
       <Avatar person={person} size="md" />
       <div className="chat-person"><strong>{person.name}</strong><StatusText person={person} /></div>
       <div className="chat-actions">
+        <IconButton label="Camera effects" onClick={() => setEffectsOpen(true)}><Settings size={20} /></IconButton>
         <IconButton label="Voice call" onClick={() => openCall('outgoing-call')}><Phone size={20} /></IconButton>
         <IconButton label="Video call" onClick={() => openCall('video-call')}><Video size={20} /></IconButton>
         <IconButton label="Conversation menu"><EllipsisVertical size={20} /></IconButton>
@@ -102,12 +105,10 @@ function ChatPanel({ person, messages, setMessages, openCall, notificationsOpen,
       {messages.map(m => <MessageBubble key={m.id} message={m} person={person} />)}
       <div className="typing"><Avatar person={person} size="xs" showStatus={false} /><span><i /><i /><i /></span></div>
     </div>
-    <form className="composer" onSubmit={e => { e.preventDefault(); send(); }}>
-      <IconButton label="Add attachment"><Plus size={22} /></IconButton>
-      <input value={draft} onChange={e => setDraft(e.target.value)} placeholder="Type a message" aria-label="Message" />
-      <IconButton label="Emoji"><Smile size={20} /></IconButton><IconButton label="Voice message"><Mic size={20} /></IconButton>
-      <button className="send-button" aria-label="Send"><Send size={20} /></button>
-    </form>
+    <div className="live-composer-wrap">{gifOpen && <section className="live-gif-picker"><header><strong>GIFs</strong><small>Built in · no external service</small><button onClick={() => setGifOpen(false)}><X size={17}/></button></header><div>{[['👋','Hello'],['😂','Laughing'],['🎉','Celebrate']].map(([emoji,label])=><button key={label}><span className="live-built-in-gif" style={{'--gif-a':'#246bfe','--gif-b':'#53d8ff'}}><b>{emoji}</b><small>{label}</small></span></button>)}</div></section>}
+      <form className="composer live-composer" onSubmit={e => { e.preventDefault(); send(); }}><button className="live-composer-option" type="button" aria-label="Send an image or GIF"><FileImage size={19}/></button><button className={cx('live-composer-option',gifOpen&&'active')} type="button" aria-label="Choose a built-in GIF" onClick={() => setGifOpen(v=>!v)}><span className="gif-label">GIF</span></button><input value={draft} onChange={e => setDraft(e.target.value)} placeholder="Type a message" aria-label="Message" /><button className="send-button live-send-button" aria-label="Send"><Send size={20} /></button></form>
+    </div>
+    {effectsOpen&&<div className="live-settings-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)setEffectsOpen(false)}}><section className="live-media-settings" role="dialog" aria-label="Camera effects settings"><header><span><Settings size={19}/><strong>Camera effects</strong></span><button onClick={()=>setEffectsOpen(false)}><X size={19}/></button></header><div className="live-settings-section"><h2>Background</h2><p>Choose what appears behind you during video calls.</p><div className="live-effect-grid">{[['none','Off'],['studio','Blue studio'],['midnight','Midnight'],['custom','Upload image']].map(([id,label],index)=><button className={index===1?'selected':''} key={id}><i className={cx('background-swatch',id)}>{id==='custom'&&<Plus size={18}/>}</i><span>{label}</span>{index===1&&<Check size={15}/>}</button>)}</div><div className="live-feature-note"><Shield size={17}/><span><strong>Self-hosted processing required</strong>Selections are saved now. Person/background separation stays off until the local video processor is installed.</span></div></div><div className="live-settings-section"><h2>Character filters</h2><p>Animated characters can follow your face, mouth, and movement.</p><div className="live-character-grid">{['Robot','Fox','Space explorer'].map(label=><button disabled key={label}><Sparkles size={20}/><span>{label}</span><small>Engine required</small></button>)}</div></div></section></div>}
   </section>;
 }
 

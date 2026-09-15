@@ -91,6 +91,16 @@ test('two users exchange messages, typing state, and an authorized call lifecycl
     assert.equal(persisted.response.status, 200);
     assert.ok(persisted.body.messages.some(message => message.id === received.id));
 
+    const gifPromise = once(bobSocket, 'message:new');
+    const sentGif = await aliceClient.request(`/conversations/${conversationId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ clientId: `gif_${Date.now()}`, text: '', media: { kind: 'gif', stickerId: 'hello', name: 'Hello' } }),
+    });
+    assert.equal(sentGif.response.status, 201);
+    const receivedGif = await gifPromise;
+    assert.equal(receivedGif.text, 'GIF');
+    assert.deepEqual(receivedGif.media, { kind: 'gif', stickerId: 'hello', name: 'Hello' });
+
     const incomingPromise = once(bobSocket, 'call:incoming');
     const initiated = await emitAck(aliceSocket, 'call:initiate', { recipientId: bob.id, type: 'voice' });
     const incoming = await incomingPromise;

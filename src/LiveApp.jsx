@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, ArrowLeft, Camera, Check, ClipboardList, Clock3, Disc3, FileVideo, ImagePlus, LayoutDashboard, LockKeyhole, LogOut, Menu, MessageCircle, Mic, MicOff, Monitor, Moon, Palette, Phone, PhoneOff, Play, RefreshCw, Save, Search, Send, ShieldCheck, Square, Sun, UserPlus, Users, Video, VideoOff, Wifi, WifiOff, X } from 'lucide-react';
+import { Activity, ArrowLeft, Camera, Check, ClipboardList, Clock3, Disc3, FileImage, FileVideo, ImagePlus, LayoutDashboard, LockKeyhole, LogOut, Menu, MessageCircle, Mic, MicOff, Monitor, Moon, Palette, Phone, PhoneOff, Play, RefreshCw, Save, Search, Send, Settings, ShieldCheck, Sparkles, Square, Sun, Upload, UserPlus, Users, Video, VideoOff, Wifi, WifiOff, X } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { createClientId } from './clientId.js';
 
@@ -43,6 +43,61 @@ async function contactPhotoData(file) {
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
+}
+
+const BUILT_IN_GIFS = [
+  { id: 'hello', emoji: '👋', label: 'Hello', colors: ['#246bfe', '#53d8ff'] },
+  { id: 'laugh', emoji: '😂', label: 'Laughing', colors: ['#0b8fc7', '#2f7bff'] },
+  { id: 'love', emoji: '❤️', label: 'Love it', colors: ['#d93675', '#ff6b8f'] },
+  { id: 'wow', emoji: '🤩', label: 'Amazing', colors: ['#7257ff', '#2f7bff'] },
+  { id: 'yes', emoji: '👍', label: 'Yes', colors: ['#128a66', '#36d98a'] },
+  { id: 'party', emoji: '🎉', label: 'Celebrate', colors: ['#7e4eff', '#53d8ff'] },
+];
+
+const BUILT_IN_GIF_IDS = new Set(BUILT_IN_GIFS.map(item => item.id));
+const DEFAULT_MEDIA_SETTINGS = { background: 'none', customBackground: '', character: 'none' };
+
+async function messageMediaData(file) {
+  if (!file || !['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
+    throw new Error('Choose a JPEG, PNG, WebP, or GIF image');
+  }
+  if (file.type === 'image/gif') {
+    if (file.size > 1.4 * 1024 * 1024) throw new Error('GIFs must be smaller than 1.4 MB');
+    return { kind: 'gif', dataUrl: await fileToDataUrl(file), name: file.name.slice(0, 120) };
+  }
+  const dataUrl = await resizedImageData(file, 1280, 0.82);
+  if (dataUrl.length > 1.6 * 1024 * 1024) throw new Error('That image is too large after resizing');
+  return { kind: 'image', dataUrl, name: file.name.slice(0, 120) };
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('That file could not be opened'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function resizedImageData(file, maxDimension, quality) {
+  const source = await fileToDataUrl(file);
+  const image = await new Promise((resolve, reject) => {
+    const candidate = new Image();
+    candidate.onload = () => resolve(candidate);
+    candidate.onerror = () => reject(new Error('That image could not be opened'));
+    candidate.src = source;
+  });
+  const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+  canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
+function BuiltInGif({ id }) {
+  const gif = BUILT_IN_GIFS.find(item => item.id === id) || BUILT_IN_GIFS[0];
+  return <span className="live-built-in-gif" style={{ '--gif-a': gif.colors[0], '--gif-b': gif.colors[1] }} role="img" aria-label={gif.label}><b>{gif.emoji}</b><small>{gif.label}</small></span>;
 }
 
 function LiveAvatar({ user, size = 'md' }) {
@@ -198,7 +253,7 @@ function useAudioAlerts() {
   return { startRingtone, stopRingtone, playMessage };
 }
 
-function useCallController(socket, user, onError, audioAlerts) {
+function useCallController(socket, user, onError, audioAlerts, mediaSettings) {
   const [call, setCall] = useState(null);
   const [localStream, setLocalStream] = useState(null);
   const [remoteStream, setRemoteStream] = useState(null);
@@ -382,11 +437,11 @@ function useCallController(socket, user, onError, audioAlerts) {
     } catch (error) { onError(error.message); }
   }, [onError, recording, socket]);
 
-  return { call, recording, startCall, acceptCall, rejectCall, endCall, muted, cameraOff, toggleMute, toggleCamera, toggleRecording, localVideoRef, remoteVideoRef };
+  return { call, recording, startCall, acceptCall, rejectCall, endCall, muted, cameraOff, toggleMute, toggleCamera, toggleRecording, localVideoRef, remoteVideoRef, mediaSettings };
 }
 
 function LiveCallOverlay({ controller }) {
-  const { call, recording, acceptCall, rejectCall, endCall, muted, cameraOff, toggleMute, toggleCamera, toggleRecording, localVideoRef, remoteVideoRef } = controller;
+  const { call, recording, acceptCall, rejectCall, endCall, muted, cameraOff, toggleMute, toggleCamera, toggleRecording, localVideoRef, remoteVideoRef, mediaSettings } = controller;
   if (!call) return null;
   const isIncoming = call.status === 'incoming';
   const isVideo = call.type === 'video';
@@ -394,7 +449,7 @@ function LiveCallOverlay({ controller }) {
     {isVideo ? <video className="live-call-remote" ref={remoteVideoRef} autoPlay playsInline /> : null}
     <button className="live-call-close" onClick={() => endCall('closed')} title="End call"><X size={20} /></button>
     <div className="live-call-person"><LiveAvatar user={call.participant} size="xl" /><h1>{call.participant?.name}</h1><p>{isIncoming ? `Incoming ${call.type} call` : call.status === 'ringing' ? 'Calling…' : call.status === 'connecting' ? 'Connecting securely…' : 'Connected'}</p></div>
-    {isVideo ? <div className="live-call-local"><video ref={localVideoRef} muted autoPlay playsInline />{cameraOff ? <VideoOff /> : <Camera />}</div> : null}
+    {isVideo ? <div className={`live-call-local background-${mediaSettings.background}`} style={mediaSettings.background === 'custom' && mediaSettings.customBackground ? { backgroundImage: `url(${mediaSettings.customBackground})` } : undefined}><video ref={localVideoRef} muted autoPlay playsInline />{cameraOff ? <VideoOff /> : <Camera />}</div> : null}
     {isVideo && recording ? <div className="live-recording-notice active" role="status"><i />This video call is being recorded by {recording.startedBy?.id === call.participant?.id ? call.participant?.name : 'you'} · Admin access only</div> : null}
     <div className="live-call-controls">
       {isIncoming ? <>
@@ -410,6 +465,39 @@ function LiveCallOverlay({ controller }) {
   </section>;
 }
 
+function MessageContent({ message }) {
+  const media = message.media;
+  if (media?.stickerId && BUILT_IN_GIF_IDS.has(media.stickerId)) return <BuiltInGif id={media.stickerId} />;
+  if (media?.url || media?.dataUrl) return <figure className="live-message-media"><img src={media.url || media.dataUrl} alt={media.name || (media.kind === 'gif' ? 'Shared GIF' : 'Shared image')} /><figcaption>{message.text || (media.kind === 'gif' ? 'GIF' : 'Photo')}</figcaption></figure>;
+  return message.text;
+}
+
+function MediaSettingsPanel({ settings, setSettings, onClose, onError }) {
+  const backgroundInput = useRef(null);
+  const chooseBackground = async event => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const customBackground = await resizedImageData(file, 1280, 0.78);
+      setSettings(current => ({ ...current, background: 'custom', customBackground }));
+    } catch (error) { onError(error.message); }
+  };
+  return <div className="live-settings-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="live-media-settings" role="dialog" aria-modal="true" aria-label="Camera effects settings">
+      <header><span><Settings size={19} /><strong>Camera effects</strong></span><button onClick={onClose} title="Close settings"><X size={19} /></button></header>
+      <div className="live-settings-section"><h2>Background</h2><p>Choose what appears behind you during video calls.</p><div className="live-effect-grid">
+        {[['none', 'Off'], ['studio', 'Blue studio'], ['midnight', 'Midnight']].map(([id, label]) => <button key={id} className={settings.background === id ? 'selected' : ''} onClick={() => setSettings(current => ({ ...current, background: id }))}><i className={`background-swatch ${id}`} /><span>{label}</span>{settings.background === id ? <Check size={15} /> : null}</button>)}
+        <button className={settings.background === 'custom' ? 'selected' : ''} onClick={() => backgroundInput.current?.click()}><i className="background-swatch custom" style={settings.customBackground ? { backgroundImage: `url(${settings.customBackground})` } : undefined}><Upload size={18} /></i><span>Upload image</span>{settings.background === 'custom' ? <Check size={15} /> : null}</button>
+      </div><input ref={backgroundInput} type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseBackground} hidden />
+      <div className="live-feature-note"><ShieldCheck size={17} /><span><strong>Self-hosted processing required</strong>Selections are saved now. Person/background separation will stay off until the non-Google local video processor is installed on this server.</span></div></div>
+      <div className="live-settings-section"><h2>Character filters</h2><p>Use an animated character that follows your face, mouth, and movement.</p><div className="live-character-grid">
+        {['Robot', 'Fox', 'Space explorer'].map(label => <button key={label} disabled><Sparkles size={20} /><span>{label}</span><small>Engine required</small></button>)}
+      </div><div className="live-feature-note"><LockKeyhole size={17} /><span><strong>No third-party calls</strong>This requires a dedicated self-hosted avatar engine and GPU. Real-person likenesses must be user-owned or used with verified permission.</span></div></div>
+    </section>
+  </div>;
+}
+
 function LiveMessenger({ user, onLogout }) {
   const [conversations, setConversations] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -423,13 +511,25 @@ function LiveMessenger({ user, onLogout }) {
   const [socket, setSocket] = useState(null);
   const [error, setError] = useState('');
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
+  const [gifOpen, setGifOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sendingMedia, setSendingMedia] = useState(false);
+  const [mediaSettings, setMediaSettings] = useState(() => {
+    try { return { ...DEFAULT_MEDIA_SETTINGS, ...JSON.parse(localStorage.getItem('halo.media-settings.v1') || '{}') }; }
+    catch { return DEFAULT_MEDIA_SETTINGS; }
+  });
   const socketRef = useRef(null);
   const selectedIdRef = useRef(selectedId);
   const typingTimerRef = useRef(null);
   const photoInputRef = useRef(null);
+  const messageMediaInputRef = useRef(null);
   const showError = useCallback(message => setError(message), []);
   const audioAlerts = useAudioAlerts();
-  const callController = useCallController(socket, user, showError, audioAlerts);
+  const callController = useCallController(socket, user, showError, audioAlerts, mediaSettings);
+
+  useEffect(() => {
+    try { localStorage.setItem('halo.media-settings.v1', JSON.stringify(mediaSettings)); } catch {}
+  }, [mediaSettings]);
 
   useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
 
@@ -519,6 +619,29 @@ function LiveMessenger({ user, onLogout }) {
     }
   };
 
+  const sendMedia = async media => {
+    if (!selectedId) return;
+    setSendingMedia(true); setError(''); setGifOpen(false);
+    try {
+      await api(`/conversations/${selectedId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ text: '', media, clientId: createClientId() }),
+      });
+    } catch (sendError) {
+      setError(sendError.message);
+    } finally {
+      setSendingMedia(false);
+    }
+  };
+
+  const uploadMessageMedia = async event => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try { await sendMedia(await messageMediaData(file)); }
+    catch (mediaError) { setError(mediaError.message); }
+  };
+
   const updateDraft = event => {
     const value = event.target.value;
     setDraft(value);
@@ -556,16 +679,26 @@ function LiveMessenger({ user, onLogout }) {
     </aside>
     <section className={`live-chat${mobileChatOpen ? ' mobile-open' : ''}`}>
       {selected ? <>
-        <header><button className="live-mobile-back" type="button" onClick={() => setMobileChatOpen(false)} title="Back to conversations"><ArrowLeft size={21} /></button><LiveAvatar user={selected.participant} /><span><strong>{selected.participant?.name}</strong><small>{selected.participant?.status || 'offline'}</small></span><div className="live-chat-actions"><input ref={photoInputRef} className="live-photo-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={updateContactPhoto} /><button title="Set contact photo" onClick={() => photoInputRef.current?.click()}><ImagePlus size={18} /></button><button title="Voice call" onClick={() => callController.startCall(selected.participant, 'voice')}><Phone size={18} /></button><button title="Video call" onClick={() => callController.startCall(selected.participant, 'video')}><Video size={19} /></button></div></header>
+        <header><button className="live-mobile-back" type="button" onClick={() => setMobileChatOpen(false)} title="Back to conversations"><ArrowLeft size={21} /></button><LiveAvatar user={selected.participant} /><span><strong>{selected.participant?.name}</strong><small>{selected.participant?.status || 'offline'}</small></span><div className="live-chat-actions"><input ref={photoInputRef} className="live-photo-input" type="file" accept="image/jpeg,image/png,image/webp" onChange={updateContactPhoto} /><button title="Set contact photo" onClick={() => photoInputRef.current?.click()}><ImagePlus size={18} /></button><button title="Camera effects" onClick={() => setSettingsOpen(true)}><Settings size={18} /></button><button title="Voice call" onClick={() => callController.startCall(selected.participant, 'voice')}><Phone size={18} /></button><button title="Video call" onClick={() => callController.startCall(selected.participant, 'video')}><Video size={19} /></button></div></header>
         <div className="live-messages" aria-live="polite">
-          {messages.map(message => <article className={message.sender.id === user.id ? 'mine' : ''} key={message.id}><div>{message.text}</div><time>{new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></article>)}
+          {messages.map(message => <article className={`${message.sender.id === user.id ? 'mine' : ''}${message.media ? ' has-media' : ''}`} key={message.id}><div><MessageContent message={message} /></div><time>{new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time></article>)}
           {typingUserId ? <div className="live-typing" aria-label={`${selected.participant?.name} is typing`}><i /><i /><i /></div> : null}
         </div>
-        <form className="live-composer" onSubmit={sendMessage}><input value={draft} onChange={updateDraft} placeholder={`Message ${selected.participant?.name}`} aria-label="Message" /><button disabled={!draft.trim()}><Send size={19} /></button></form>
+        <div className="live-composer-wrap">
+          {gifOpen ? <section className="live-gif-picker" aria-label="Built-in GIFs"><header><strong>GIFs</strong><small>Built in · no external service</small><button type="button" onClick={() => setGifOpen(false)}><X size={17} /></button></header><div>{BUILT_IN_GIFS.map(gif => <button type="button" key={gif.id} onClick={() => sendMedia({ kind: 'gif', stickerId: gif.id, name: gif.label })}><BuiltInGif id={gif.id} /></button>)}</div></section> : null}
+          <form className="live-composer" onSubmit={sendMessage}>
+            <input ref={messageMediaInputRef} className="live-photo-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={uploadMessageMedia} />
+            <button className="live-composer-option" type="button" title="Send an image or GIF" disabled={sendingMedia} onClick={() => messageMediaInputRef.current?.click()}><FileImage size={19} /></button>
+            <button className={`live-composer-option${gifOpen ? ' active' : ''}`} type="button" title="Choose a built-in GIF" disabled={sendingMedia} onClick={() => setGifOpen(current => !current)}><span className="gif-label">GIF</span></button>
+            <input value={draft} onChange={updateDraft} placeholder={sendingMedia ? 'Sending media…' : `Message ${selected.participant?.name}`} aria-label="Message" />
+            <button className="live-send-button" disabled={!draft.trim() || sendingMedia} title="Send message"><Send size={19} /></button>
+          </form>
+        </div>
       </> : <div className="live-empty"><MessageCircle size={42} /><h1>Your messages</h1><p>Search for another registered user to start a persistent conversation.</p></div>}
       {error ? <button className="live-toast" onClick={() => setError('')}>{error}</button> : null}
     </section>
     <LiveCallOverlay controller={callController} />
+    {settingsOpen ? <MediaSettingsPanel settings={mediaSettings} setSettings={setMediaSettings} onClose={() => setSettingsOpen(false)} onError={showError} /> : null}
   </main>;
 }
 

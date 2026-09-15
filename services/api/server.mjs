@@ -14,7 +14,8 @@ const cookieSecure = process.env.COOKIE_SECURE === 'true';
 const sessionCookie = 'halo_session';
 const sessionLifetimeMs = 30 * 24 * 60 * 60 * 1000;
 const otpLifetimeMs = 5 * 60 * 1000;
-const maxJsonBytes = 96 * 1024;
+const maxJsonBytes = 2 * 1024 * 1024;
+const builtInGifIds = new Set(['hello', 'laugh', 'love', 'wow', 'yes', 'party']);
 const otpRateLimit = new Map();
 const onlineConnections = new Map();
 const livekitApiKey = process.env.LIVEKIT_API_KEY || '';
@@ -27,7 +28,10 @@ const recordingRetentionDays = Number(process.env.VIDEO_RECORDING_RETENTION_DAYS
 const recordingTtlSeconds = Math.min(600, Math.max(30, Number(process.env.RECORDING_SIGNED_URL_TTL_SECONDS || 120)));
 const recordingAccessKey = process.env.RECORDING_STORAGE_ACCESS_KEY || '';
 const recordingSecretKey = process.env.RECORDING_STORAGE_SECRET_KEY || '';
+const storageInternalEndpoint = new URL(process.env.RECORDING_STORAGE_ENDPOINT || 'http://object-storage:9000');
 const recordingPublicEndpoint = new URL(process.env.RECORDING_PUBLIC_ENDPOINT || 'http://localhost:9000');
+const messageMediaBucket = process.env.MESSAGE_MEDIA_BUCKET || 'halo-message-media';
+const messageMediaTtlSeconds = Math.min(86400, Math.max(300, Number(process.env.MESSAGE_MEDIA_SIGNED_URL_TTL_SECONDS || 3600)));
 const egressClient = livekitApiKey && livekitApiSecret
   ? new EgressClient(livekitInternalUrl, livekitApiKey, livekitApiSecret, { requestTimeout: 30000 })
   : null;
@@ -98,14 +102,14 @@ function awsEncode(value) {
   return encodeURIComponent(value).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
-function presignedRecordingUrl(objectKey, expiresSeconds) {
+function presignedObjectUrl(bucket, objectKey, expiresSeconds) {
   if (!recordingAccessKey || !recordingSecretKey) throw Object.assign(new Error('Recording store is not configured'), { status: 503 });
   const now = new Date();
   const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
   const dateStamp = amzDate.slice(0, 8);
   const region = 'us-east-1';
   const scope = `${dateStamp}/${region}/s3/aws4_request`;
-  const canonicalUri = `/${awsEncode(recordingBucket)}/${objectKey.split('/').map(awsEncode).join('/')}`;
+  const canonicalUri = `/${awsEncode(bucket)}/${objectKey.split('/').map(awsEncode).join('/')}`;
   const query = {
     'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
     'X-Amz-Credential': `${recordingAccessKey}/${scope}`,
@@ -119,6 +123,34 @@ function presignedRecordingUrl(objectKey, expiresSeconds) {
   const signingKey = hmac(hmac(hmac(hmac(`AWS4${recordingSecretKey}`, dateStamp), region), 's3'), 'aws4_request');
   const signature = createHmac('sha256', signingKey).update(stringToSign).digest('hex');
   return `${recordingPublicEndpoint.origin}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`;
+}
+
+function presignedRecordingUrl(objectKey, expiresSeconds) {
+  return presignedObjectUrl(recordingBucket, objectKey, expiresSeconds);
+}
+
+async function putObject(bucket, objectKey, data, contentType) {
+  if (!recordingAccessKey || !recordingSecretKey) throw Object.assign(new Error('Media store is not configured'), { status: 503 });
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+  const region = 'us-east-1';
+  const scope = `${dateStamp}/${region}/s3/aws4_request`;
+  const canonicalUri = `/${awsEncode(bucket)}/${objectKey.split('/').map(awsEncode).join('/')}`;
+  const payloadHash = createHash('sha256').update(data).digest('hex');
+  const canonicalHeaders = `content-type:${contentType}\nhost:${storageInternalEndpoint.host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
+  const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
+  const canonicalRequest = `PUT\n${canonicalUri}\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+  const stringToSign = `AWS4-HMAC-SHA256\n${amzDate}\n${scope}\n${createHash('sha256').update(canonicalRequest).digest('hex')}`;
+  const signingKey = hmac(hmac(hmac(hmac(`AWS4${recordingSecretKey}`, dateStamp), region), 's3'), 'aws4_request');
+  const signature = createHmac('sha256', signingKey).update(stringToSign).digest('hex');
+  const response = await fetch(`${storageInternalEndpoint.origin}${canonicalUri}`, { method: 'PUT', headers: {
+    'Content-Type': contentType,
+    'X-Amz-Content-Sha256': payloadHash,
+    'X-Amz-Date': amzDate,
+    Authorization: `AWS4-HMAC-SHA256 Credential=${recordingAccessKey}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`,
+  }, body: data });
+  if (!response.ok) throw Object.assign(new Error('Media could not be stored'), { status: 503 });
 }
 
 function hashOtp(phone, code) {
@@ -352,11 +384,15 @@ function allowOtpRequest(key) {
 }
 
 function serializeMessage(message) {
+  const content = typeof message.content === 'object' && message.content ? message.content : {};
+  const storedMedia = content.media && typeof content.media === 'object' ? content.media : null;
+  const media = storedMedia?.objectKey ? { ...storedMedia, url: presignedObjectUrl(messageMediaBucket, storedMedia.objectKey, messageMediaTtlSeconds) } : storedMedia;
   return {
     id: message.id,
     conversationId: message.conversationId,
     clientId: message.clientId,
-    text: typeof message.content === 'object' && message.content ? message.content.text : '',
+    text: content.text || (media?.kind === 'gif' ? 'GIF' : media ? 'Photo' : ''),
+    media,
     createdAt: message.createdAt,
     sender: publicUser(message.sender),
   };
@@ -735,13 +771,37 @@ async function route(req, res) {
       const body = await readJson(req);
       const text = String(body.text || '').trim();
       const clientId = String(body.clientId || '');
-      if (!text || text.length > 4000) return json(res, 400, { error: 'Message text must contain 1–4000 characters' });
       if (!/^[A-Za-z0-9_-]{8,100}$/.test(clientId)) return json(res, 400, { error: 'A valid clientId is required' });
+      let media = null;
+      if (body.media && typeof body.media === 'object') {
+        const kind = body.media.kind === 'gif' ? 'gif' : body.media.kind === 'image' ? 'image' : '';
+        const stickerId = String(body.media.stickerId || '');
+        const dataUrl = String(body.media.dataUrl || '');
+        const name = String(body.media.name || '').trim().slice(0, 120);
+        if (!kind) return json(res, 400, { error: 'Unsupported media type' });
+        if (stickerId) {
+          if (kind !== 'gif' || !builtInGifIds.has(stickerId)) return json(res, 400, { error: 'Unknown built-in GIF' });
+          media = { kind, stickerId, name: name || 'GIF' };
+        } else {
+          const match = dataUrl.match(/^data:image\/(jpeg|png|webp|gif);base64,([A-Za-z0-9+/=]+)$/);
+          if (!match || dataUrl.length > 1.9 * 1024 * 1024) return json(res, 400, { error: 'Images and GIFs must use a supported format and be smaller than 1.5 MB' });
+          if ((match[1] === 'gif') !== (kind === 'gif')) return json(res, 400, { error: 'Media type does not match the uploaded file' });
+          const mime = `image/${match[1]}`;
+          const bytes = Buffer.from(match[2], 'base64');
+          if (!bytes.length || bytes.length > 1.5 * 1024 * 1024) return json(res, 400, { error: 'Uploaded media is empty or too large' });
+          const extension = match[1] === 'jpeg' ? 'jpg' : match[1];
+          const mediaId = createHash('sha256').update(`${auth.user.id}:${clientId}`).digest('hex').slice(0, 36);
+          const objectKey = `messages/${conversationId}/${auth.user.id}/${mediaId}.${extension}`;
+          await putObject(messageMediaBucket, objectKey, bytes, mime);
+          media = { kind, objectKey, mime, name: name || (kind === 'gif' ? 'GIF' : 'Photo') };
+        }
+      }
+      if ((!text && !media) || text.length > 4000) return json(res, 400, { error: 'Add message text or supported media' });
       let message;
       try {
         message = await prisma.$transaction(async tx => {
           const created = await tx.message.create({
-            data: { conversationId, senderId: auth.user.id, clientId, content: { text } },
+            data: { conversationId, senderId: auth.user.id, clientId, type: media ? 'IMAGE' : 'TEXT', content: { text, media } },
             include: { sender: { include: { profile: true } } },
           });
           await tx.conversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } });

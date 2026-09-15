@@ -61,6 +61,8 @@ services:
       RECORDING_STORAGE_ENDPOINT: http://object-storage:9000
       RECORDING_PUBLIC_ENDPOINT: ${RECORDING_PUBLIC_ENDPOINT:-https://808hub.net}
       RECORDING_BUCKET: ${RECORDING_BUCKET:-halo-video-recordings}
+      MESSAGE_MEDIA_BUCKET: ${MESSAGE_MEDIA_BUCKET:-halo-message-media}
+      MESSAGE_MEDIA_SIGNED_URL_TTL_SECONDS: ${MESSAGE_MEDIA_SIGNED_URL_TTL_SECONDS:-3600}
       RECORDING_STORAGE_ACCESS_KEY: ${RECORDING_STORAGE_ACCESS_KEY:-halo_recordings}
       RECORDING_STORAGE_SECRET_KEY: ${RECORDING_STORAGE_SECRET_KEY:-halo_recordings_change_me}
       RECORDING_KMS_KEY_ID: ${RECORDING_KMS_KEY_ID:-private-object-storage}
@@ -169,7 +171,7 @@ services:
       - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.halo-recordings.rule=Host(`${HALO_DOMAIN:-808hub.net}`) && PathPrefix(`/${RECORDING_BUCKET:-halo-video-recordings}`)"
+      - "traefik.http.routers.halo-recordings.rule=Host(`${HALO_DOMAIN:-808hub.net}`) && (PathPrefix(`/${RECORDING_BUCKET:-halo-video-recordings}`) || PathPrefix(`/${MESSAGE_MEDIA_BUCKET:-halo-message-media}`))"
       - "traefik.http.routers.halo-recordings.entrypoints=${TRAEFIK_HTTPS_ENTRYPOINT:-websecure}"
       - "traefik.http.routers.halo-recordings.tls=true"
       - "traefik.http.routers.halo-recordings.tls.certresolver=${TRAEFIK_CERT_RESOLVER:-letsencrypt}"
@@ -186,6 +188,8 @@ services:
       MINIO_ROOT_PASSWORD: ${RECORDING_STORAGE_SECRET_KEY:-halo_recordings_change_me}
       RECORDING_BUCKET: ${RECORDING_BUCKET:-halo-video-recordings}
       RECORDING_RETENTION_DAYS: ${VIDEO_RECORDING_RETENTION_DAYS:-30}
+      MESSAGE_MEDIA_BUCKET: ${MESSAGE_MEDIA_BUCKET:-halo-message-media}
+      MESSAGE_MEDIA_RETENTION_DAYS: ${MESSAGE_MEDIA_RETENTION_DAYS:-365}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >-
@@ -193,7 +197,10 @@ services:
         mc mb --ignore-existing "halo/$${RECORDING_BUCKET}";
         mc anonymous set none "halo/$${RECORDING_BUCKET}";
         mc ilm rule add --expire-days "$${RECORDING_RETENTION_DAYS}" "halo/$${RECORDING_BUCKET}" || true;
-        echo "Private recording bucket is ready";
+        mc mb --ignore-existing "halo/$${MESSAGE_MEDIA_BUCKET}";
+        mc anonymous set none "halo/$${MESSAGE_MEDIA_BUCKET}";
+        mc ilm rule add --expire-days "$${MESSAGE_MEDIA_RETENTION_DAYS}" "halo/$${MESSAGE_MEDIA_BUCKET}" || true;
+        echo "Private recording and message-media buckets are ready";
     networks: [halo]
 
   postgres:

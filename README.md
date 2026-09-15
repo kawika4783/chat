@@ -1,6 +1,6 @@
 # Halo realtime messaging
 
-Halo now includes a functional Phase 4 communication foundation: phone/OTP accounts, HTTP-only database-backed sessions, persistent PostgreSQL messages, Socket.IO delivery, presence, authenticated one-to-one LiveKit voice/video calls, automatic server-side video recording, and an admin-only recording vault. The original product mockup remains available at `/design-preview`.
+Halo includes phone/OTP accounts, HTTP-only database-backed sessions, persistent PostgreSQL messages, self-hosted image/GIF sharing, Socket.IO delivery, presence, authenticated one-to-one LiveKit voice/video calls, optional participant-controlled video recording, and an admin-only recording vault. The product mockup remains available at `/design-preview`.
 
 ## Run with Docker Compose
 
@@ -30,7 +30,7 @@ $env:HALO_TEST_BASE_URL='http://127.0.0.1:8080'
 npm test
 ```
 
-The test verifies authentication enforcement, two independent sessions, an authorized direct conversation, a realtime typing event, Socket.IO message delivery, and PostgreSQL persistence.
+The test verifies authentication enforcement, two independent sessions, an authorized direct conversation, realtime typing, text and built-in GIF delivery, and PostgreSQL persistence.
 
 It also verifies call initiation, incoming/accepted states, authorized room-token issuance, connected/end transitions, persisted call history, and denial of recording metadata to ordinary users.
 
@@ -77,6 +77,8 @@ The Vite-only development server does not proxy `/api`; Docker Compose is the su
 - OTP values are HMAC-hashed, expire after five minutes, have attempt limits, and are request-rate-limited per IP/phone in this single-node milestone.
 - Every conversation and message query checks membership server-side.
 - Message `clientId` values provide per-sender idempotency.
+- Uploaded message media is written to the private MinIO `halo-message-media` bucket; messages store only object metadata and receive expiring signed URLs.
+- The built-in GIF picker is packaged with Halo and does not query Giphy, Google, or another external catalog.
 - Other users' phone numbers are not returned by public user or conversation payloads.
 - PostgreSQL foreign keys and conversation/message access indexes are committed in the initial migration.
 
@@ -97,4 +99,6 @@ infrastructure/              Docker, Nginx, and Coturn configuration
 
 ## Current boundary
 
-Messaging and authenticated one-to-one voice/video calling are functional. Media is routed by LiveKit; a video call automatically starts LiveKit Egress and writes an MP4 to the private MinIO bucket. Only `ADMIN` and `SUPER_ADMIN` sessions can list recordings or request a short-lived playback URL, and each playback request is audit logged. Configure TLS, public LiveKit networking, strong secrets, and jurisdiction-appropriate recording consent before an Internet deployment.
+Messaging, private image/GIF sharing, and authenticated one-to-one voice/video calling are functional. Media is routed by LiveKit; a participant can explicitly start LiveKit Egress, which writes an MP4 to the private MinIO recording bucket and notifies the other participant. Only `ADMIN` and `SUPER_ADMIN` sessions can list recordings or request a short-lived playback URL, and each playback request is audit logged.
+
+Camera-effect selections and custom-background uploads are available in Settings. Person/background separation and motion-driven character replacement remain visibly gated until a non-Google, self-hosted video-processing engine is installed. A production character engine requires suitable GPU capacity and must restrict real-person likenesses to user-owned or permission-verified assets; Halo never falls back to a cloud avatar service.

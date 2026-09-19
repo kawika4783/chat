@@ -3,6 +3,7 @@ name: halo
 services:
   web:
     image: ${HALO_WEB_IMAGE:-halo-web:local}
+    pull_policy: always
     build:
       context: .
       dockerfile: infrastructure/docker/web.Dockerfile
@@ -38,6 +39,7 @@ services:
 
   api:
     image: ${HALO_API_IMAGE:-halo-api:local}
+    pull_policy: always
     build:
       context: .
       dockerfile: infrastructure/docker/api.Dockerfile

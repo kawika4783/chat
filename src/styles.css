@@ -25,6 +25,14 @@
 @media(max-width:760px){.live-auth-card{padding:27px}.live-shell{display:block;height:100dvh}.live-sidebar{height:42dvh;border:0;border-bottom:1px solid var(--border)}.live-sidebar>header{height:62px}.live-me{display:none}.live-conversation-list{display:flex;overflow-x:auto}.live-conversation{min-width:260px}.live-chat{height:58dvh}.live-chat>header{height:58px;min-height:58px;padding:0 12px}.live-chat-actions{gap:4px}.live-chat-actions button{width:36px;height:36px}.live-messages{padding:12px}.live-messages article{max-width:84%}.live-composer{margin:0 9px max(9px,env(safe-area-inset-bottom));min-height:55px}.live-call-close{right:14px;top:14px}.live-call-local{right:14px;top:88px;width:112px;height:150px}.live-call-controls{bottom:max(28px,env(safe-area-inset-bottom));width:calc(100% - 24px);justify-content:center;padding:14px 10px}.live-call-controls button{width:58px;height:58px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
+/* Live-app layout corrections */
+.live-user-results .live-avatar{flex:0 0 37px;width:37px;height:37px}
+.live-user-results .live-result-copy{display:flex;flex:1;min-width:0;flex-direction:column;gap:3px}
+.live-messages article.has-media>div{width:fit-content;max-width:100%}
+.live-messages article.has-media .live-message-media{width:min(420px,calc(100vw - 80px))}
+.live-messages article.has-media .live-message-media img{width:100%;height:auto;max-height:330px;object-fit:contain}
+.live-call-controls button span{top:74px;left:50%;transform:translateX(-50%);line-height:1}
+
 /* Optional participant-controlled recording and protected admin vault */
 .live-recording-notice{position:absolute;top:82px;left:50%;transform:translateX(-50%);z-index:4;display:flex;align-items:center;gap:8px;padding:9px 13px;border-radius:18px;background:rgba(18,13,24,.72);backdrop-filter:blur(14px);font-size:12px}.live-recording-notice i{width:9px;height:9px;border-radius:50%;background:#e4aa36}.live-recording-notice.active i{background:#f24d57;box-shadow:0 0 0 4px rgba(242,77,87,.2)}
 .live-photo-input{display:none}.live-call-controls button.recording-active{background:#fff0f1;color:#d82f43}.live-call-controls button.recording-active svg{fill:#d82f43}.live-recording-notice[role=status]{max-width:calc(100% - 32px);text-align:center}

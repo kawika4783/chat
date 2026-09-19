@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Activity, ArrowLeft, Camera, Check, ClipboardList, Clock3, Disc3, FileImage, FileVideo, ImagePlus, LayoutDashboard, LockKeyhole, LogOut, Menu, MessageCircle, Mic, MicOff, Monitor, Moon, Palette, Phone, PhoneOff, Play, RefreshCw, Save, Search, Send, Settings, ShieldCheck, Sparkles, Square, Sun, Upload, UserPlus, Users, Video, VideoOff, Wifi, WifiOff, X } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { createClientId } from './clientId.js';
+import { createClientBackgroundProcessor } from './clientBackground.js';
 
 async function api(path, options = {}) {
   const response = await fetch(`/api${path}`, {
@@ -262,6 +263,7 @@ function useCallController(socket, user, onError, audioAlerts, mediaSettings) {
   const [recording, setRecording] = useState(null);
   const callRef = useRef(null);
   const roomRef = useRef(null);
+  const videoProcessorRef = useRef(null);
   const remoteStreamRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
@@ -281,6 +283,8 @@ function useCallController(socket, user, onError, audioAlerts, mediaSettings) {
     callRef.current = null;
     const room = roomRef.current;
     roomRef.current = null;
+    videoProcessorRef.current?.destroy().catch(() => {});
+    videoProcessorRef.current = null;
     room?.disconnect();
     remoteStreamRef.current = null;
     setLocalStream(null);
@@ -326,14 +330,20 @@ function useCallController(socket, user, onError, audioAlerts, mediaSettings) {
       room.disconnect();
       throw Object.assign(new Error('Call ended while media permission was pending'), { name: 'AbortError' });
     }
+    const cameraTrack = room.localParticipant.getTrackPublication(Track.Source.Camera)?.track;
+    if (cameraTrack && activeCall.type === 'video' && mediaSettings.background !== 'none') {
+      const processor = createClientBackgroundProcessor(mediaSettings);
+      await cameraTrack.setProcessor(processor, true);
+      videoProcessorRef.current = processor;
+    }
     const tracks = [
       room.localParticipant.getTrackPublication(Track.Source.Microphone)?.track?.mediaStreamTrack,
-      room.localParticipant.getTrackPublication(Track.Source.Camera)?.track?.mediaStreamTrack,
+      videoProcessorRef.current?.processedTrack || cameraTrack?.mediaStreamTrack,
     ].filter(Boolean);
     setLocalStream(new MediaStream(tracks));
     setCall(current => current ? { ...current, status: 'connected', recordingAvailable: credentials.recordingAvailable } : current);
     socket.emit('call:connected', { callId: activeCall.callId });
-  }, [cleanup, socket]);
+  }, [cleanup, mediaSettings, socket]);
 
   const endCall = useCallback((reason = 'ended') => {
     const activeCall = callRef.current;
@@ -449,7 +459,7 @@ function LiveCallOverlay({ controller }) {
     {isVideo ? <video className="live-call-remote" ref={remoteVideoRef} autoPlay playsInline /> : null}
     <button className="live-call-close" onClick={() => endCall('closed')} title="End call"><X size={20} /></button>
     <div className="live-call-person"><LiveAvatar user={call.participant} size="xl" /><h1>{call.participant?.name}</h1><p>{isIncoming ? `Incoming ${call.type} call` : call.status === 'ringing' ? 'Calling…' : call.status === 'connecting' ? 'Connecting securely…' : 'Connected'}</p></div>
-    {isVideo ? <div className={`live-call-local background-${mediaSettings.background}`} style={mediaSettings.background === 'custom' && mediaSettings.customBackground ? { backgroundImage: `url(${mediaSettings.customBackground})` } : undefined}><video ref={localVideoRef} muted autoPlay playsInline />{cameraOff ? <VideoOff /> : <Camera />}</div> : null}
+    {isVideo ? <div className={`live-call-local background-${mediaSettings.background}`} style={mediaSettings.background === 'custom' && mediaSettings.customBackground ? { backgroundImage: `url(${mediaSettings.customBackground})` } : undefined}><video ref={localVideoRef} muted autoPlay playsInline />{cameraOff ? <VideoOff /> : <Camera />} {mediaSettings.background !== 'none' ? <small className="live-local-processing">Browser processed</small> : null}</div> : null}
     {isVideo && recording ? <div className="live-recording-notice active" role="status"><i />This video call is being recorded by {recording.startedBy?.id === call.participant?.id ? call.participant?.name : 'you'} · Admin access only</div> : null}
     <div className="live-call-controls">
       {isIncoming ? <>
@@ -487,10 +497,10 @@ function MediaSettingsPanel({ settings, setSettings, onClose, onError }) {
     <section className="live-media-settings" role="dialog" aria-modal="true" aria-label="Camera effects settings">
       <header><span><Settings size={19} /><strong>Camera effects</strong></span><button onClick={onClose} title="Close settings"><X size={19} /></button></header>
       <div className="live-settings-section"><h2>Background</h2><p>Choose what appears behind you during video calls.</p><div className="live-effect-grid">
-        {[['none', 'Off'], ['studio', 'Blue studio'], ['midnight', 'Midnight']].map(([id, label]) => <button key={id} className={settings.background === id ? 'selected' : ''} onClick={() => setSettings(current => ({ ...current, background: id }))}><i className={`background-swatch ${id}`} /><span>{label}</span>{settings.background === id ? <Check size={15} /> : null}</button>)}
+        {[['none', 'Off'], ['studio', 'Blue studio'], ['midnight', 'Midnight'], ['blur', 'Blur']].map(([id, label]) => <button key={id} className={settings.background === id ? 'selected' : ''} onClick={() => setSettings(current => ({ ...current, background: id }))}><i className={`background-swatch ${id}`} /><span>{label}</span>{settings.background === id ? <Check size={15} /> : null}</button>)}
         <button className={settings.background === 'custom' ? 'selected' : ''} onClick={() => backgroundInput.current?.click()}><i className="background-swatch custom" style={settings.customBackground ? { backgroundImage: `url(${settings.customBackground})` } : undefined}><Upload size={18} /></i><span>Upload image</span>{settings.background === 'custom' ? <Check size={15} /> : null}</button>
       </div><input ref={backgroundInput} type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseBackground} hidden />
-      <div className="live-feature-note"><ShieldCheck size={17} /><span><strong>Self-hosted processing required</strong>Selections are saved now. Person/background separation will stay off until the non-Google local video processor is installed on this server.</span></div></div>
+      <div className="live-feature-note"><ShieldCheck size={17} /><span><strong>Processed locally in your browser</strong>Background effects stay on this device. No video frames are uploaded to a third-party service or sent to Google.</span></div></div>
       <div className="live-settings-section"><h2>Character filters</h2><p>Use an animated character that follows your face, mouth, and movement.</p><div className="live-character-grid">
         {['Robot', 'Fox', 'Space explorer'].map(label => <button key={label} disabled><Sparkles size={20} /><span>{label}</span><small>Engine required</small></button>)}
       </div><div className="live-feature-note"><LockKeyhole size={17} /><span><strong>No third-party calls</strong>This requires a dedicated self-hosted avatar engine and GPU. Real-person likenesses must be user-owned or used with verified permission.</span></div></div>

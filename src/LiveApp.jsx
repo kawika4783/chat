@@ -559,10 +559,10 @@ function LiveMessenger({ user, onLogout }) {
   }, [selectedId]);
 
   useEffect(() => {
-    const socket = io({ path: '/socket.io', withCredentials: true });
+    const socket = io({ path: '/socket.io', withCredentials: true, transports: ['websocket', 'polling'] });
     socketRef.current = socket;
     setSocket(socket);
-    socket.on('connect', () => setConnected(true));
+    socket.on('connect', () => { setConnected(true); setError(''); });
     socket.on('disconnect', () => setConnected(false));
     socket.on('connect_error', connectionError => setError(connectionError.message));
     socket.on('message:new', message => {

@@ -25,7 +25,7 @@ services:
       - "traefik.http.middlewares.halo-force-https.redirectscheme.permanent=true"
       - "traefik.http.middlewares.halo-security-headers.headers.stsSeconds=31536000"
       - "traefik.http.middlewares.halo-security-headers.headers.contentTypeNosniff=true"
-      - "traefik.http.middlewares.halo-security-headers.headers.frameDeny=true"
+      - "traefik.http.middlewares.halo-security-headers.headers.customResponseHeaders.X-Frame-Options=DENY"
     depends_on:
       api:
         condition: service_started

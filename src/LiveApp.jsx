@@ -463,13 +463,13 @@ function LiveCallOverlay({ controller }) {
     {isVideo && recording ? <div className="live-recording-notice active" role="status"><i />This video call is being recorded by {recording.startedBy?.id === call.participant?.id ? call.participant?.name : 'you'} · Admin access only</div> : null}
     <div className="live-call-controls">
       {isIncoming ? <>
-        <button className="decline" onClick={rejectCall}><PhoneOff /><span>Decline</span></button>
-        <button className="accept" onClick={acceptCall}><Phone /><span>Accept</span></button>
+        <div className="live-call-action"><button className="decline" onClick={rejectCall}><PhoneOff /></button><span>Decline</span></div>
+        <div className="live-call-action"><button className="accept" onClick={acceptCall}><Phone /></button><span>Accept</span></div>
       </> : <>
-        <button onClick={toggleMute}>{muted ? <MicOff /> : <Mic />}<span>{muted ? 'Unmute' : 'Mute'}</span></button>
-        {isVideo ? <button onClick={toggleCamera}>{cameraOff ? <VideoOff /> : <Video />}<span>{cameraOff ? 'Camera on' : 'Camera off'}</span></button> : null}
-        {isVideo && call.recordingAvailable ? <button className={recording ? 'recording-active' : ''} onClick={toggleRecording}>{recording ? <Square /> : <Disc3 />}<span>{recording ? 'Stop record' : 'Record'}</span></button> : null}
-        <button className="decline" onClick={() => endCall('hangup')}><PhoneOff /><span>End</span></button>
+        <div className="live-call-action"><button onClick={toggleMute}>{muted ? <MicOff /> : <Mic />}</button><span>{muted ? 'Unmute' : 'Mute'}</span></div>
+        {isVideo ? <div className="live-call-action"><button onClick={toggleCamera}>{cameraOff ? <VideoOff /> : <Video />}</button><span>{cameraOff ? 'Camera on' : 'Camera off'}</span></div> : null}
+        {isVideo && call.recordingAvailable ? <div className="live-call-action"><button className={recording ? 'recording-active' : ''} onClick={toggleRecording}>{recording ? <Square /> : <Disc3 />}</button><span>{recording ? 'Stop record' : 'Record'}</span></div> : null}
+        <div className="live-call-action"><button className="decline" onClick={() => endCall('hangup')}><PhoneOff /></button><span>End</span></div>
       </>}
     </div>
   </section>;

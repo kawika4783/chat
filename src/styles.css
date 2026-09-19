@@ -26,12 +26,15 @@
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
 /* Live-app layout corrections */
-.live-user-results .live-avatar{flex:0 0 37px;width:37px;height:37px}
+.live-user-results .live-avatar{display:grid;place-items:center;flex:0 0 37px;width:37px;height:37px;flex-direction:row;gap:0;line-height:1;text-align:center}
 .live-user-results .live-result-copy{display:flex;flex:1;min-width:0;flex-direction:column;gap:3px}
 .live-messages article.has-media>div{width:fit-content;max-width:100%;min-width:0}
 .live-messages article.has-media .live-message-media{width:min(420px,calc(100vw - 80px))}
 .live-messages article.has-media .live-message-media img{width:100%;height:auto;max-height:330px;object-fit:contain}
-.live-call-controls button span{top:74px;left:50%;transform:translateX(-50%);line-height:1}
+.live-call-controls{align-items:flex-start;justify-content:center}
+.live-call-action{display:flex;flex:0 0 auto;min-width:62px;flex-direction:column;align-items:center;gap:10px}
+.live-call-action>span{font-size:10px;line-height:1;white-space:nowrap}
+.live-call-controls button{flex:0 0 auto}
 
 /* Optional participant-controlled recording and protected admin vault */
 .live-recording-notice{position:absolute;top:82px;left:50%;transform:translateX(-50%);z-index:4;display:flex;align-items:center;gap:8px;padding:9px 13px;border-radius:18px;background:rgba(18,13,24,.72);backdrop-filter:blur(14px);font-size:12px}.live-recording-notice i{width:9px;height:9px;border-radius:50%;background:#e4aa36}.live-recording-notice.active i{background:#f24d57;box-shadow:0 0 0 4px rgba(242,77,87,.2)}
